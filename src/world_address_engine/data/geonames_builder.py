@@ -21,6 +21,15 @@ PROFILES = frozenset({"COMPACT_GLOBAL", "EXTENDED_GLOBAL"})
 ALIAS_LANGS = frozenset({"en", "zh", "zh-CN", "zh-TW", "zh-Hans", "zh-Hant"})
 BATCH_SIZE = 10000
 
+# Generation of the on-disk search key format. Generation 1 kept the
+# punctuation of the source name ("st. john s"), generation 2 folds it
+# away ("st john s"). The key format decides the bytes of the database, so
+# it also decides the identity of the pack: a pack is the source snapshot
+# *and* the key format generation. Publishing generation 2 under the bare
+# source date would collide with the published generation 1 pack, which
+# the immutable install rightly refuses to overwrite.
+PACK_FORMAT_VERSION = "k2"
+
 _SEPARATORS = re.compile(r"[\W_]+", re.UNICODE)
 
 
@@ -185,6 +194,12 @@ def pack_manifest(profile: str, metrics: dict, source_archives: dict, source_dat
     the published pack stays reproducible. `source_sha256` is a composite over
     every source archive so that changing any one of them changes the pack
     identity; `source_archives` keeps the per-archive detail.
+
+    `pack_version` is the source snapshot date **and** the key format
+    generation. The database bytes depend on both, so a pack that changed
+    format has to change version as well: the published 2026-10-22 packs
+    carry the punctuation bearing keys and must stay installable next to
+    their replacement.
     """
     if profile not in PROFILES:
         raise ValueError("profile must be COMPACT_GLOBAL or EXTENDED_GLOBAL")
@@ -197,7 +212,7 @@ def pack_manifest(profile: str, metrics: dict, source_archives: dict, source_dat
     return {
         "pack_id": f"geonames-{profile.lower().replace('_', '-')}",
         "profile": profile,
-        "pack_version": source_date,
+        "pack_version": f"{source_date}-{PACK_FORMAT_VERSION}",
         "schema_version": 1,
         "created_at": source_date,
         "source_date": source_date,

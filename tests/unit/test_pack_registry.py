@@ -112,3 +112,26 @@ def test_install_pack_refuses_tampered_builder_output(tmp_path):
     with pytest.raises(ValueError, match="checksum"):
         install_pack(built, manifest_fields(db_sha256=digest), tmp_path / "packs")
     assert not list((tmp_path / "packs").glob("geonames-compact-global-*"))
+
+
+def test_a_rebuilt_pack_installs_beside_the_published_one(tmp_path):
+    """Two different databases of the same source date must coexist.
+
+    The published 2026-10-22 pack and the rebuilt pack hold different
+    bytes. The immutable install refuses to overwrite a version, so the
+    rebuilt pack has to carry its own version or it can never be
+    installed at all.
+    """
+    legacy = tmp_path / "legacy.sqlite"
+    legacy.write_bytes(b"legacy punctuation bearing payload")
+    rebuilt = tmp_path / "rebuilt.sqlite"
+    rebuilt.write_bytes(b"rebuilt punctuation free payload")
+    root = tmp_path / "packs"
+    first = install_pack(legacy, manifest_fields(
+        db_sha256=hashlib.sha256(legacy.read_bytes()).hexdigest()), root)
+    second = install_pack(rebuilt, manifest_fields(
+        pack_version="2026-10-22-k2",
+        db_sha256=hashlib.sha256(rebuilt.read_bytes()).hexdigest()), root)
+    assert first.name == "geonames-compact-global-2026-10-22"
+    assert second.name == "geonames-compact-global-2026-10-22-k2"
+    assert (second / PACK_DB_NAME).read_bytes() == b"rebuilt punctuation free payload"

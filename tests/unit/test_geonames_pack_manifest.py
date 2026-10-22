@@ -30,7 +30,7 @@ def test_pack_manifest_is_registry_compatible():
     assert REQUIRED <= manifest.keys()
     assert manifest["pack_id"] == "geonames-compact-global"
     assert manifest["profile"] == "COMPACT_GLOBAL"
-    assert manifest["pack_version"] == "2026-10-22"
+    assert manifest["pack_version"] == "2026-10-22-k2"
     assert manifest["record_count"] == 715567
     assert manifest["alias_count_by_language"] == METRICS["alias_count_by_language"]
     assert manifest["source_archives"] == ARCHIVES
@@ -49,6 +49,27 @@ def test_pack_manifest_source_hash_tracks_every_source_archive():
     first = pack_manifest("COMPACT_GLOBAL", METRICS, ARCHIVES, "2026-10-22", "b" * 64)
     second = pack_manifest("COMPACT_GLOBAL", METRICS, changed, "2026-10-22", "b" * 64)
     assert first["source_sha256"] != second["source_sha256"]
+
+
+def test_pack_version_carries_the_key_format_generation():
+    """A rebuilt pack must never reuse the version of a published pack.
+
+    The published 2026-10-22 packs carry the legacy, punctuation bearing
+    keys. The rebuilt pack stores punctuation free keys, so its bytes are
+    different. Publishing it under the bare source date would collide with
+    the immutable install and would silently swap a different database
+    underneath the same name.
+    """
+    manifest = pack_manifest("COMPACT_GLOBAL", METRICS, ARCHIVES, "2026-10-22", "b" * 64)
+    assert manifest["pack_version"] != "2026-10-22"
+    assert manifest["pack_version"].startswith("2026-10-22-")
+
+
+def test_pack_version_is_stable_for_the_same_source_and_format():
+    """The version is derived, not stamped, so a rebuild is reproducible."""
+    first = pack_manifest("COMPACT_GLOBAL", METRICS, ARCHIVES, "2026-10-22", "b" * 64)
+    second = pack_manifest("COMPACT_GLOBAL", dict(METRICS), dict(ARCHIVES), "2026-10-22", "b" * 64)
+    assert first["pack_version"] == second["pack_version"]
 
 
 def test_builder_reports_alias_counts_by_language(tmp_path):

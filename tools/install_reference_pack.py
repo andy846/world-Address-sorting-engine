@@ -19,9 +19,11 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
+if str(ROOT / "tools") not in sys.path:
+    sys.path.insert(0, str(ROOT / "tools"))
 
-from world_address_engine.data.geonames_builder import pack_manifest
 from world_address_engine.data.pack_registry import install_pack
+from build_reference_pack import manifest_from_report
 
 
 def main():
@@ -38,17 +40,7 @@ def main():
         manifest = json.loads(a.manifest.read_text(encoding="utf-8"))
     elif a.build_report and a.profile:
         report = json.loads(a.build_report.read_text(encoding="utf-8"))
-        built = report["profiles"][a.profile]
-        manifest = pack_manifest(
-            a.profile,
-            {"place_count": built["place_count"],
-             "alias_count": built["alias_count"],
-             "sqlite_bytes": built["sqlite_bytes"],
-             "alias_count_by_language": built["alias_language_counts"]},
-            report["sources"],
-            report.get("source_date") or "2026-10-22",
-            built["db_sha256"],
-        )
+        manifest = manifest_from_report(report, a.profile)
     else:
         p.error("supply --manifest or both --build-report and --profile")
     installed = install_pack(a.database, manifest, a.active_root)

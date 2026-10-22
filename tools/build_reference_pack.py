@@ -32,6 +32,28 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def manifest_from_report(report: dict, profile: str) -> dict:
+    """Derive the installable manifest from a build report.
+
+    The report and the manifest are two views of one measurement. The
+    installer derives its manifest from the report, so both have to be
+    produced by the same code, otherwise a pack can be installed under a
+    checksum that was never measured.
+    """
+    if profile not in report.get("profiles", {}):
+        raise KeyError(f"the report has no profile {profile}")
+    built = report["profiles"][profile]
+    return pack_manifest(
+        profile,
+        {"place_count": built["place_count"],
+         "alias_count": built["alias_count"],
+         "sqlite_bytes": built["sqlite_bytes"],
+         "alias_count_by_language": built["alias_language_counts"]},
+        report["sources"],
+        report.get("source_date") or "2026-10-22",
+        built["db_sha256"])
+
+
 def build(source_dir: Path, output_dir: Path, profiles: list[str], compress: bool,
           source_date: str | None = None) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -66,12 +88,6 @@ def build(source_dir: Path, output_dir: Path, profiles: list[str], compress: boo
             if con.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise ValueError("SQLite integrity verification failed")
         db_digest = sha256(db)
-        manifest = pack_manifest(profile,
-                                 {**metrics, "alias_count_by_language": languages},
-                                 sources, source_date, db_digest)
-        (output_dir / (profile.lower() + ".manifest.json")).write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8")
         detail = {"database": filename, **metrics,
                   "sqlite_mib": round(actual / 1048576, 3),
                   "db_sha256": db_digest, "alias_language_counts": languages}
@@ -84,6 +100,12 @@ def build(source_dir: Path, output_dir: Path, profiles: list[str], compress: boo
                            "compressed_bytes": zipped.stat().st_size,
                            "compressed_mib": round(zipped.stat().st_size / 1048576, 3)})
         report["profiles"][profile] = detail
+        # The manifest is derived from the report, so the two can never
+        # disagree about a checksum or a count.
+        manifest = manifest_from_report(report, profile)
+        (output_dir / (profile.lower() + ".manifest.json")).write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8")
     (output_dir / "build_report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf8")
     return report
 
