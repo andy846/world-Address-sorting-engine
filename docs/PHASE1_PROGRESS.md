@@ -110,3 +110,75 @@ under `builds/real-2026-10-22/` and `packs/`.
 - Alias language provenance is lossy because of the `UNIQUE (place_id,
   search_key)` constraint and insert order; the report understates real
   English and Chinese coverage. Matching is unaffected.
+
+## Milestone 2 — geographic classification accuracy (2026-10-23)
+
+Commits `525e0e2` (evidence-mass model) and `63d2c32` (alias provenance).
+
+### What changed
+
+The place-count score (`0.35 + 0.26 * rows`) is gone. Evidence is now a
+weighted mass per destination in which **each search term contributes at
+most one weight**, however many gazetteer rows the term matches. A country
+entity weighs 0.60, an `ADM1` 0.26, an `ADM2` 0.16, deeper administration
+0.08, and a populated place `0.26 * min(1, log10(pop+1)/6)`. Places with no
+population carry no evidence.
+
+A destination is assertable only when `support >= 0.15` **and** it either
+has two independent search terms or is a country entity. Company names are
+withdrawn from the evidence before any decision is taken. A structured
+country field is trusted unless the address text contradicts it.
+
+### Audit findings closed
+
+P0-2, P0-3, P1-5, P1-6, P1-7 and builder defect A1. The before/after probe
+table is in `docs/SECURITY_AUDIT_2026-10-23.md`.
+
+### Verified against the real packs
+
+`tests/integration/test_real_geonames_classification.py` runs 67 cases
+against **both** published databases and is skipped when they are absent.
+Measured outcomes against `EXTENDED_GLOBAL`:
+
+| Address | Result |
+|---|---|
+| `London Road, Mumbai, India` | `MATCHED IN` |
+| `10 Bayfront Avenue, Singapore` | `MATCHED SG` |
+| `Shinjuku-ku, Tokyo 160-0022` | `MATCHED JP` |
+| `Macau` / `Macao` | `MATCHED MO` |
+| `Timor-Leste` | `MATCHED TP` |
+| `Springfield, Illinois` | `MATCHED US` |
+| `Berlin, Germany` / `Paris, France` | `MATCHED DE` / `MATCHED FR` |
+| `Hong Kong` / `香港` | `MATCHED HK` |
+| `Guam` / `Puerto Rico` | `MATCHED GU` / `MATCHED PR` |
+| `中国北京市朝阳区` / `上海浦东新区` | `MATCHED CN` |
+| `St. Louis, Missouri, United States` | `MATCHED US` |
+| `Main Street, Springfield` | `REVIEW_AMBIGUOUS`, no code |
+| `Tokyo` | `UNKNOWN`, no code |
+| `Tokyo` with `Country="US"` | `REVIEW_CONFLICT`, no code |
+| `CHINA CONSTRUCTION LTD` | `UNKNOWN`, no code |
+| `Jane Doe / CHINA CONSTRUCTION LTD / ...` | `REVIEW_AMBIGUOUS`, no code |
+| `北京市 / 中国银行` | `UNKNOWN`, no code |
+
+### Measurements
+
+- Suite: **187 passed** (91 unit + 96 integration, of which 67
+  exercise the two real published packs), 0 failures.
+- Throughput: 4.07 ms mean per record against `COMPACT_GLOBAL`, 4.33 ms
+  against `EXTENDED_GLOBAL` (~240 records/sec, one core, warm cache). See
+  `docs/benchmarks.md`; this excludes the reader, exporter and checkpoint,
+  and Priority 4 must still add caching and a reused connection.
+- Database sizes are unchanged: COMPACT 143,949,824 bytes, EXTENDED
+  1,098,661,888 bytes.
+
+### Remaining blockers
+
+- The verified **Hongkong Post** two-character master is still missing
+  (Priority 3). Every result above uses `tests/hkp_master_fixture.py`, which
+  is explicitly a synthetic fixture and not an official catalogue.
+- The production-approval gate still reads `production_approved` from the
+  catalogue file it is vetting (P0-1, Priority 3).
+- Throughput is a single-record cost with no caching (Priority 4).
+- `docs/benchmarks.md` still has no 100k / 1M / 5M measurement, no peak RSS
+  and no labelled gold set, so no accuracy or speed claim may be made.
+

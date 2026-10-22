@@ -94,3 +94,26 @@ them.
   zh-Hans gold set.
 - Lookup latency with the page cache cold (the figures above are warm).
 - A measured `ALL_LANG_ALIAS` baseline for size comparison.
+
+## End-to-end classification throughput (Milestone 2)
+
+Measured on 2026-10-23 with the evidence-mass classifier, single process,
+single thread, warm page cache, 20 addresses drawn from the spec's
+acceptance fixtures in English and Chinese, repeated three times
+(`n = 60` per profile). The pack is opened once per record.
+
+| Profile | Mean | Median | p95 | Max | Throughput |
+|---|---:|---:|---:|---:|---:|
+| `COMPACT_GLOBAL` | 4.07 ms | 3.81 ms | 8.16 ms | 9.14 ms | ~246 records/sec |
+| `EXTENDED_GLOBAL` | 4.33 ms | 3.76 ms | 9.66 ms | 11.15 ms | ~231 records/sec |
+
+Status mix over the same sample: 54 `MATCHED`, 3 `REVIEW_AMBIGUOUS`,
+3 `UNKNOWN` per 20 distinct addresses.
+
+**This is not yet a production throughput figure.** The number is dominated
+by opening the reference database and re-running the same gazetteer queries
+for every record, and it does not include the record reader, the exporter
+or the checkpoint writer. Extrapolated naively it is ~5.7 hours for five
+million records on one core. The high-volume batch work in Priority 4 must
+add a normalised-address cache, reuse one open connection per job and
+measure the real pipeline before any speed is claimed.

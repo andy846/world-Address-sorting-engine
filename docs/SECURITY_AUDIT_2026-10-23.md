@@ -13,18 +13,18 @@ and two paths emit a confident `MATCHED` for the wrong country.
 | # | Sev | Area | One-line defect | Status |
 |---|---|---|---|---|
 | 1 | P0 | Production gate | `_hkp_audited()` reads `production_approved` from the very catalogue file it is vetting, so a hand-made SQLite passes the gate | Open — Priority 3 |
-| 2 | P0 | Conflict handling | A country hint plus weak geography emits the *wrong* country as confident `MATCHED` | Open — Priority 2 |
-| 3 | P0 | Explicit evidence | A company name on any line but the first is accepted as explicit country evidence | Open — Priority 2 |
+| 2 | P0 | Conflict handling | A country hint plus weak geography emits the *wrong* country as confident `MATCHED` | Fixed — 525e0e2 |
+| 3 | P0 | Explicit evidence | A company name on any line but the first is accepted as explicit country evidence | Fixed — 525e0e2 |
 | 4 | P1 | Checkpoint | A tampered shard, renamed with a recomputed digest, publishes an arbitrary code under a `COMPLETE` manifest | Open — Priority 4 |
-| 5 | P1 | Scoring | The `MATCHED` threshold is exactly "two place rows", so a lone city token can be asserted | Open — Priority 2 |
-| 6 | P1 | Catalogue | The two-letter code format is validated at import only, never at query time, so a 3-letter code can be emitted under the 2-character scheme | Open — Priority 3 |
-| 7 | P1 | Catalogue | The ISO crosswalk is not injective, and a missing approved HKP row raises `KeyError` instead of `REVIEW_CODE_MAPPING` | Open — Priority 3 |
+| 5 | P1 | Scoring | The `MATCHED` threshold is exactly "two place rows", so a lone city token can be asserted | Fixed — 525e0e2 |
+| 6 | P1 | Catalogue | The two-letter code format is validated at import only, never at query time, so a 3-letter code can be emitted under the 2-character scheme | Fixed — 525e0e2 |
+| 7 | P1 | Catalogue | The ISO crosswalk is not injective, and a missing approved HKP row raises `KeyError` instead of `REVIEW_CODE_MAPPING` | Fixed — 525e0e2 |
 | 8 | P1 | Provenance | "Official source" validation is a URL-host string check, and `approval_status` ships inside the data file it is supposed to police | Open — Priority 3 |
 | 9 | P1 | Labelling | A `--test-only` export is byte-for-byte indistinguishable from a production export | Open — Priority 4 |
 | 10 | P2 | Privacy | `.gitignore` does not cover the default export filenames, so customer addresses can be committed | Open — Priority 4 |
 | 11 | P2 | Export | `Country_Summary.csv` bypasses the spreadsheet formula sanitizer | Open — Priority 4 |
 | 12 | P2 | Export | The detailed export omits most fields the spec requires | Open — Priority 4 |
-| A1 | P2 | Builder | `UNIQUE (place_id, search_key)` plus insert order discards the authoritative language tag, so alias language provenance is lossy | Open — Priority 2 |
+| A1 | P2 | Builder | `UNIQUE (place_id, search_key)` plus insert order discards the authoritative language tag, so alias language provenance is lossy | Fixed — 63d2c32 |
 
 ## Detail
 
@@ -206,3 +206,54 @@ See `docs/benchmarks.md` for the measured effect.
   never enables it today.
 - XLSX `Source_Record_No` is a logical sequence after blank rows are skipped,
   not the physical spreadsheet row.
+
+
+## Remediation — Milestone 2 (commits `525e0e2`, `63d2c32`)
+
+The findings marked *Fixed* above were closed by replacing the place-count
+score with a weighted evidence mass. Each search term contributes at most one
+weight per destination, however many gazetteer rows it matches, so the model
+no longer saturates on a global pack:
+
+| Evidence | Weight |
+|---|---:|
+| country entity (`PCLI`/`PCLX`/`PCLS`/`PCLD`, or `admin1_code = '00'`) | 0.60 |
+| `ADM1` | 0.26 |
+| `ADM2` | 0.16 |
+| deeper administration | 0.08 |
+| populated place | 0.26 x min(1, log10(population+1)/6) |
+| place with no population | 0 (no evidence) |
+
+A destination is assertable only when `support >= 0.15` **and** it either
+carries at least two independent search terms or is a country entity.
+
+### Probe results before and after
+
+| Audit probe | Before | After |
+|---|---|---|
+| `Tokyo` with `Country="US"` | `MATCHED US`, confidence 0.98 | `REVIEW_CONFLICT`, no code |
+| `Jane Doe / CHINA CONSTRUCTION LTD / 1 Main St, Springfield, US` | `MATCHED CN` | `REVIEW_AMBIGUOUS`, no code |
+| `北京市 / 中国银行` | `MATCHED CN` | `UNKNOWN`, no code |
+| a lone city token | `MATCHED` at 0.87 (two rows) | `UNKNOWN` / `REVIEW_AMBIGUOUS` |
+| a forged `code='FRA'` row under `HKP_DESTINATION_2` | `FRA` emitted | `REVIEW_CODE_MAPPING`, no code |
+| an ISO code claimed by two destinations | silently collapsed | `REVIEW_CODE_MAPPING`, no code |
+| an ISO row whose destination has no HKP row | `KeyError` | `REVIEW_CODE_MAPPING`, no code |
+
+### Deliberate behaviour changes
+
+- **A lone city token is no longer asserted.** `Tokyo` alone is `UNKNOWN`,
+  and `Frankfurt` alone is `UNKNOWN`; the evidence is real but a single
+  token cannot carry a country. A structured country field supplied by the
+  operator still resolves these: `Frankfurt` with `Country="DE"` is
+  `MATCHED DE`.
+- **Generic address words are not evidence.** `main`, `street`, `road`,
+  `suite` and similar words are place names in the gazetteer, and counting
+  them was one reason the old score saturated. They are now dropped unless
+  they are part of a longer place name (`Hyde Park` still resolves).
+- **The first line of a multi-line address is the recipient.** It is
+  excluded from geographic evidence as well as from catalogue matching.
+- **The published 2026-10-22 packs are unaffected in content.** The
+  builder fix changes only the `language` label of an alias row, so the
+  indexed place/alias pairs and therefore matching are identical; the bytes
+  differ, so packs built after `63d2c32` must be published as a new pack
+  version.
