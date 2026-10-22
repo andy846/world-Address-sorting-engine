@@ -41,3 +41,21 @@ python -m pytest -q
 Linux unit/integration checks are not substitutes for independent code review, comprehensive HKP postal-master verification, and Windows offline end-to-end acceptance.
 
 See `docs/PHASE1_PROGRESS.md` and `docs/superpowers/plans/2026-10-23-hkp-trilingual-mvp-implementation.md` for plan and release gates.
+
+
+## Resumable classification (test-only until approved HKP master exists)
+
+Normal classification refuses the current unreviewed HKP reference master. For synthetic tests only, run:
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m world_address_engine.cli classify --input "synthetic.csv" --output "test-output" --geo-db "geo.db" --hkp-db "hkp.db" --address-column "Address" --batch-size 10000 --test-only
+python -m world_address_engine.cli resume --job-dir "test-output"
+```
+
+Five-line CSV files named NAME_ADDRESS_LINE1–5 support automatic address-column detection. Add --max-batches 1 to pause after one checkpoint, then resume.
+Outputs are Classified_Addresses.csv, Manual_Review.csv, Country_Summary.csv and Run_Manifest.json. The manifest is published LAST; without it, results are incomplete.
+
+**Privacy:** The .job-state folder stores plaintext recipient address rows as local JSONL checkpoints. Limit filesystem access, delete according to retention policy, and never upload this folder or actual customer CSV files to GitHub. SHA256 validation detects modified source files, data packs and checkpoint batches.
+
+**Status:** Not production ready — no fully reviewed HKP code master, full real GeoNames data packs, calibrated geographic scoring, Windows GUI or independent review. The new CLI workflow is for synthetic fixtures only.
