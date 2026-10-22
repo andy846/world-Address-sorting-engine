@@ -12,18 +12,18 @@ and two paths emit a confident `MATCHED` for the wrong country.
 
 | # | Sev | Area | One-line defect | Status |
 |---|---|---|---|---|
-| 1 | P0 | Production gate | `_hkp_audited()` reads `production_approved` from the very catalogue file it is vetting, so a hand-made SQLite passes the gate | Open — Priority 3 |
+| 1 | P0 | Production gate | `_hkp_audited()` reads `production_approved` from the very catalogue file it is vetting, so a hand-made SQLite passes the gate | Fixed — `ed05659` |
 | 2 | P0 | Conflict handling | A country hint plus weak geography emits the *wrong* country as confident `MATCHED` | Fixed — 525e0e2 |
 | 3 | P0 | Explicit evidence | A company name on any line but the first is accepted as explicit country evidence | Fixed — 525e0e2 |
-| 4 | P1 | Checkpoint | A tampered shard, renamed with a recomputed digest, publishes an arbitrary code under a `COMPLETE` manifest | Open — Priority 4 |
+| 4 | P1 | Checkpoint | A tampered shard, renamed with a recomputed digest, publishes an arbitrary code under a `COMPLETE` manifest | Fixed — `81c6e3b` |
 | 5 | P1 | Scoring | The `MATCHED` threshold is exactly "two place rows", so a lone city token can be asserted | Fixed — 525e0e2 |
 | 6 | P1 | Catalogue | The two-letter code format is validated at import only, never at query time, so a 3-letter code can be emitted under the 2-character scheme | Fixed — 525e0e2 |
 | 7 | P1 | Catalogue | The ISO crosswalk is not injective, and a missing approved HKP row raises `KeyError` instead of `REVIEW_CODE_MAPPING` | Fixed — 525e0e2 |
-| 8 | P1 | Provenance | "Official source" validation is a URL-host string check, and `approval_status` ships inside the data file it is supposed to police | Open — Priority 3 |
-| 9 | P1 | Labelling | A `--test-only` export is byte-for-byte indistinguishable from a production export | Open — Priority 4 |
-| 10 | P2 | Privacy | `.gitignore` does not cover the default export filenames, so customer addresses can be committed | Open — Priority 4 |
-| 11 | P2 | Export | `Country_Summary.csv` bypasses the spreadsheet formula sanitizer | Open — Priority 4 |
-| 12 | P2 | Export | The detailed export omits most fields the spec requires | Open — Priority 4 |
+| 8 | P1 | Provenance | "Official source" validation is a URL-host string check, and `approval_status` ships inside the data file it is supposed to police | Fixed — `ed05659` |
+| 9 | P1 | Labelling | A `--test-only` export is byte-for-byte indistinguishable from a production export | Fixed — `81c6e3b` |
+| 10 | P2 | Privacy | `.gitignore` does not cover the default export filenames, so customer addresses can be committed | Fixed — `81c6e3b` |
+| 11 | P2 | Export | `Country_Summary.csv` bypasses the spreadsheet formula sanitizer | Fixed — `81c6e3b` |
+| 12 | P2 | Export | The detailed export omits most fields the spec requires | Fixed — `81c6e3b` |
 | A1 | P2 | Builder | `UNIQUE (place_id, search_key)` plus insert order discards the authoritative language tag, so alias language provenance is lossy | Fixed — 63d2c32 |
 
 ## Detail
@@ -257,3 +257,49 @@ carries at least two independent search terms or is a country entity.
   indexed place/alias pairs and therefore matching are identical; the bytes
   differ, so packs built after `63d2c32` must be published as a new pack
   version.
+
+## Remediation — Milestone 3 (commits `ed05659`, `81c6e3b`, `8faff89`, `0957f1d`)
+
+### The findings that are now closed
+
+| # | Sev | How it is closed now |
+|---|---|---|
+| 1 | P0 | The catalogue file can no longer approve itself. A production run needs a **signed approval manifest** whose key is held outside the repository, and the manifest binds the catalogue version, the source CSV digest, the row count, the built database digest and the official documents that were vetted. The signature, the digests and the approved destinations are all checked; anything missing fails closed (`hkp/approval.py`). |
+| 4 | P1 | A checkpoint shard is local, writable data, so its own digest in its filename proves nothing. Every committed record is re-derived and compared with the shard before the export is published (`jobs/runner.py --verify-shards`), and every exported code is re-checked against the approved catalogue. |
+| 8 | P1 | `approval_status` inside the data file no longer grants anything. A code is resolvable only when the signed approval names the destination *and* ratifies the exact source document the row was taken from. A `TEST_FIXTURE` signed manifest can never authorise production, whatever it claims. |
+| 9 | P1 | Every export carries a `Data_Class` column and a `DATA_CLASS.txt` marker, and the run manifest records the same class. A test export is `TEST_ONLY_UNVERIFIED` everywhere and can no longer be mistaken for a production mailing list. |
+| 10 | P2 | The default export file names and the checkpoint state directory are ignored by git, and the checkpoint shards are deleted once the exports are published (`--keep-checkpoint` keeps them on request). |
+| 11 | P2 | `Country_Summary.csv` is written through the same formula sanitizer as the detailed export. |
+| 12 | P2 | The detailed export now carries the destination identity, the catalogue version, the pack versions, the rules version and the data class next to the original columns. |
+
+### Review findings of the geographic milestone
+
+| # | Sev | How it is closed now |
+|---|---|---|
+| P0-1 | P0 | `Wake, United States Minor Outlying Islands` was matched to the United States. The country name is now parsed as a complete entity, so the territory resolves to `UM` and ends in a review instead of a wrong country (`8faff89`). |
+| P0-2 | P0 | A postcode was read as a company word. `Dublin, Ireland D02` is now matched to Ireland, and an alphanumeric postcode is no longer treated as a company suffix (`8faff89`). |
+| P0-3 | P0 | The search key of the pack and the reader could drift apart. Both now use one shared `normalize_search_key`, so a producer and its consumer cannot disagree (`8d49d57`). |
+
+### New findings from the 2026-10-23 evening audit
+
+| # | Sev | Area | Defect | Status |
+|---|---|---|---|---|
+| 13 | P1 | Quality control | The review panel took its authority from the operator's text boxes instead of from the run | Fixed — `55eaef1` |
+| 14 | P1 | Quality control | A manual correction was written into the export before it was known to be allowed | Fixed — `f1f0aed` |
+| 15 | P1 | Threading | A running worker thread was destroyed with the window, aborting the interpreter | Fixed — `55eaef1` |
+| 16 | P2 | Cancellation | A cancel was ignored for any job smaller than one batch, so the run published anyway | Fixed — `957a1e0` |
+| 17 | P2 | Privacy | The plaintext customer checkpoint stayed in the output folder after a successful run | Fixed — `957a1e0` |
+| 18 | P2 | Build tool | The pack build crashed after the database was written, because the alias language counts were removed from the metrics before the manifest was built from them | Fixed — `13c8e24` |
+| 19 | P2 | Retrieval | A Han place name with an administrative suffix (`臺北市`) was unreachable when the address left the suffix out (`臺北`) | Fixed — `54b5f26` |
+| 20 | P2 | Transparency | A review that could not map its country did not name the country | Fixed — `f27dcd9` |
+
+### Confirmed safe after the remediation
+
+- The production gate cannot be satisfied by a file the operator supplies.
+  A catalogue built from a hand-made CSV fails without a signed approval,
+  and a `TEST_FIXTURE` approval never authorises production.
+- A manual correction may only assert a code the approval in force issues,
+  and the correction is rejected before the published export is touched.
+- The review panel is bound to the run that produced the export.
+- A cancelled run never publishes a manifest, and the plaintext checkpoint is
+  removed once the exports exist.
