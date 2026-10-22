@@ -43,6 +43,7 @@
 `src/world_address_engine/jobs/checkpoint.py` — safe resumable batch output manifest and write lifecycle.
 `src/world_address_engine/cli.py` — batch CLI entry point.
 `src/world_address_engine/gui/app.py` — PySide6 desktop workflow and review.
+`src/world_address_engine/gui/review_store.py` — per-record audited QC decisions and CSV review log.
 `tools/build_reference_pack.py` — offline build command consuming predownloaded source archives.
 `tests/fixtures` — tiny pinned, synthetic/license-appropriate source rows and official-code excerpt references.
 `tests/unit`, `tests/integration`, `tests/offline` — test units, end-to-end, offline/no-network checks.
@@ -67,8 +68,8 @@ Five high-risk cases to be nailed down by tests below:
 - Test: `tests/unit/test_models.py`
 
 **Interfaces:**
-- Produces: `AddressRecord(record_no:int, source_file:str, source_sheet:str|None, record_id:str|None, fields:dict[str,str], address_text:str, country_hint:str|None)`; `DestinationCandidate(destination_id:str, evidence:tuple[str,...], score:float)`; `ClassificationResult(record_no:int, status:str, hkp_code:str|None, confidence:float, reason:str, destination_id:str|None)`.
-- Define `STATUSES` as exactly: MATCHED, REVIEW_AMBIGUOUS, REVIEW_CONFLICT, REVIEW_CODE_MAPPING, UNKNOWN, INPUT_ERROR. Only MATCHED can have a nonempty asserted hkp_code.
+- Produces: `AddressRecord(record_no:int, source_file:str, source_sheet:str|None, record_id:str|None, fields:dict[str,str], address_text:str, country_hint:str|None, input_error:str|None=None)`; `DestinationCandidate(destination_id:str, evidence:tuple[str,...], score:float)`; `ClassificationResult(record_no:int, status:str, hkp_code:str|None, confidence:float, reason:str, destination_id:str|None)`.
+- Define `STATUSES` as exactly: MATCHED, REVIEW_AMBIGUOUS, REVIEW_CONFLICT, REVIEW_CODE_MAPPING, UNKNOWN, INPUT_ERROR. Only MATCHED can have a nonempty asserted hkp_code. An adapter may yield AddressRecord(input_error=...) only if a logical record boundary is known; classification then returns INPUT_ERROR with no code. If malformed file framing makes logical-record boundaries unknowable, fail and mark the entire job incomplete instead of fabricating records.
 
 - [ ] **Step 1: Write failing test** `test_nonmatched_result_never_contains_asserted_hkp_code` and `test_address_record_keeps_original_fields`; assert constructing a non-MATCHED result with "US" raises ValueError and input fields remain unmodified.
 - [ ] **Step 2: Verify RED** Run `python -m pytest tests/unit/test_models.py -v`; expect missing model/validation.
@@ -175,7 +176,7 @@ Five high-risk cases to be nailed down by tests below:
 - Produces: `classify_record(record:AddressRecord, geo_db:Path, hkp_db:Path)->ClassificationResult`.
 - Initial conservative policy: a unique explicit unambiguous destination yields MATCHED if official mapping valid and no conflicting location evidence; otherwise an independently consistent city+admin/country pair may be MATCHED; isolated ambiguous city, street or postcode MUST NOT be auto-assigned. Scores are diagnostic only until separately calibrated.
 
-- [ ] **Step 1: Write failing tests** `test_london_road_mumbai_india_is_in`, `test_springfield_does_not_guess`, `test_conflicting_explicit_countries_review`, `test_verified_macau_is_mo_not_cn`, `test_timor_leste_is_tp_not_tl`, `test_unapproved_hkp_code_never_asserted`, and `test_unsupported_script_has_review_reason`.
+- [ ] **Step 1: Write failing tests** `test_london_road_mumbai_india_is_in`, `test_springfield_does_not_guess`, `test_conflicting_explicit_countries_review`, `test_verified_macau_is_mo_not_cn`, `test_timor_leste_is_tp_not_tl`, `test_unapproved_hkp_code_never_asserted`, `test_bad_input_record_returns_input_error`, and `test_unsupported_script_has_review_reason`.
 - [ ] **Step 2: Verify RED** `python -m pytest tests/unit/test_classify.py -v`.
 - [ ] **Step 3: Implement transparent rule-based evidence resolution** Explicit statuses, method/evidence reason, confidence metadata and approved-code guard; do not fit weights to desired sample answers.
 - [ ] **Step 4: Verify GREEN** Targeted suite then `python -m pytest`.
@@ -191,9 +192,9 @@ Five high-risk cases to be nailed down by tests below:
 - Produces: `iter_csv_records(path:Path, encoding:str, address_columns:tuple[str,...], record_id_column:str|None=None)->Iterator[AddressRecord]` and `iter_txt_records(path:Path, encoding:str, mode:str, delimiter:str|None=None)->Iterator[AddressRecord]`.
 - Explicit TXT modes: line and delimited. CSV RFC-style quoting, embedded newline as one logical record, UTF-8 BOM/Big5 selection, unreadable byte errors visible.
 
-- [ ] **Step 1: Write failing tests** `test_multiline_csv_is_one_logical_record`, `test_big5_chinese_round_trip`, `test_utf8_bom_header`, `test_bad_bytes_report_input_error_without_drop` and `test_txt_delimiter_defines_record_boundary`.
+- [ ] **Step 1: Write failing tests** `test_multiline_csv_is_one_logical_record`, `test_big5_chinese_round_trip`, `test_utf8_bom_header`, `test_bad_bytes_report_input_error_without_drop_when_record_boundary_is_known`, `test_unrecoverable_csv_framing_marks_job_incomplete` and `test_txt_delimiter_defines_record_boundary`.
 - [ ] **Step 2: Verify RED** `python -m pytest tests/unit/test_delimited.py -v`.
-- [ ] **Step 3: Implement bounded-memory iterators** Preserve source row, original fields and stable logical row ID; expose record parse failures through a defined INPUT_ERROR record rather than dropping them.
+- [ ] **Step 3: Implement bounded-memory iterators** Preserve source row, original fields and stable logical row ID; expose recoverable record parse failures as AddressRecord(input_error=...), and fail the entire job safely if invalid framing prevents establishing trustworthy logical-record boundaries.
 - [ ] **Step 4: Verify GREEN** Targeted suite then `python -m pytest`.
 - [ ] **Step 5: Commit** `git add src tests && git commit -m "feat: ingest CSV and TXT addresses without losing records"`.
 
@@ -206,9 +207,9 @@ Five high-risk cases to be nailed down by tests below:
 **Interfaces:**
 - Produces: `iter_xlsx_records(path:Path, sheet_name:str, address_columns:tuple[str,...], record_id_column:str|None=None)->Iterator[AddressRecord]` using openpyxl read_only=True, data_only=True with explicit cached-formula handling policy.
 
-- [ ] **Step 1: Write failing tests** `test_sheet_selection_and_column_mapping`, `test_blank_rows_do_not_shift_record_ids`, `test_formula_without_cached_value_is_input_error` and `test_xlsx_reader_is_iterator_not_materialized_list`.
+- [ ] **Step 1: Write failing tests** `test_sheet_selection_and_column_mapping`, `test_blank_rows_do_not_shift_record_ids`, `test_formula_without_cached_value_is_input_error_using_readonly_formula_check` and `test_xlsx_reader_is_iterator_not_materialized_list`.
 - [ ] **Step 2: Verify RED** `python -m pytest tests/unit/test_xlsx.py -v`.
-- [ ] **Step 3: Implement XLSX reader** Enforce Excel row constraints, preserve sheet/source/row metadata and original non-address columns.
+- [ ] **Step 3: Implement XLSX reader** Enforce Excel row constraints, preserve sheet/source/row metadata and original non-address columns. If data_only=True yields no cache for a required field, use a parallel read-only formula check or a clear conservative missing-required-cell error: never silently interpret a formula without a cached value as an empty address.
 - [ ] **Step 4: Verify GREEN** Targeted suite then `python -m pytest`.
 - [ ] **Step 5: Commit** `git add src tests && git commit -m "feat: stream address rows from selected Excel worksheet"`.
 
@@ -221,9 +222,9 @@ Five high-risk cases to be nailed down by tests below:
 **Interfaces:**
 - Consumes: `Iterator[tuple[AddressRecord,ClassificationResult]]`.
 - Produces: `write_reports(items:Iterator[tuple[AddressRecord,ClassificationResult]], output_dir:Path, run_metadata:dict)->dict[str,int]`.
-- Required results: Classified_Addresses.csv, Country_Summary.csv, Manual_Review.csv, Run_Manifest.json. Use UTF-8 BOM output for Excel-facing view, safeguard spreadsheet formula injection in text fields, and separately document raw-machine CSV behavior. Report file hashes and versions.
+- Required results: Classified_Addresses.csv (default Excel-safe original-value display), Country_Summary.csv, Manual_Review.csv, Run_Manifest.json; optional Classified_Addresses.machine.csv preserves exact unmodified field values with an explicit spreadsheet-import warning. Use UTF-8 BOM for Excel-facing view; escape formula-leading text for spreadsheet consumers in that view only. Record export mode in manifest. Report file hashes and versions.
 
-- [ ] **Step 1: Write failing tests** `test_summary_counts_equal_matched_rows`, `test_review_rows_not_assigned_codes`, `test_duplicate_address_rows_count_twice`, `test_spreadsheet_formula_injection_is_neutralized` and `test_original_columns_and_order_preserved`.
+- [ ] **Step 1: Write failing tests** `test_summary_counts_equal_matched_rows`, `test_review_rows_not_assigned_codes`, `test_duplicate_address_rows_count_twice`, `test_spreadsheet_formula_injection_is_neutralized_in_excel_view`, `test_machine_mode_keeps_exact_original_string` and `test_original_columns_and_order_preserved`.
 - [ ] **Step 2: Verify RED** `python -m pytest tests/unit/test_reports.py -v`.
 - [ ] **Step 3: Implement streaming writer and reconciliation** Require sum(status totals)==input count, sum(destination totals)==MATCHED; refuse complete manifest if not equal.
 - [ ] **Step 4: Verify GREEN** Targeted suite then `python -m pytest`.
@@ -249,7 +250,7 @@ Five high-risk cases to be nailed down by tests below:
 ### Task 12: PySide6 Desktop GUI, Quality Review and Export
 
 **Files:**
-- Create: `src/world_address_engine/gui/app.py`
+- Create: `src/world_address_engine/gui/app.py`, `src/world_address_engine/gui/review_store.py`
 - Test: `tests/integration/test_gui_workflow.py`
 
 **Interfaces:**
@@ -257,7 +258,7 @@ Five high-risk cases to be nailed down by tests below:
 - GUI surfaces: Import file/encoding/sheet/column mapping, select Compact/Extended pack, job controls and progress, destination counts, non-MATCHED review cases, approved-code manual override with reason, export and source version display.
 - Review decisions must be traceable per input record with operator, time and reason; never silently modify unrelated same-address rows.
 
-- [ ] **Step 1: Write failing tests** `test_gui_import_map_classify_export` (offscreen Qt), `test_gui_shows_unsupported_language_review`, `test_review_override_changes_one_record_only` and `test_gui_does_not_block_main_thread_on_large_job`.
+- [ ] **Step 1: Write failing tests** `test_gui_import_map_classify_export` (offscreen Qt), `test_gui_shows_unsupported_language_review`, `test_review_override_changes_one_record_only`, `test_review_decision_is_audited` and `test_gui_does_not_block_main_thread_on_large_job`.
 - [ ] **Step 2: Verify RED** `python -m pytest tests/integration/test_gui_workflow.py -v`.
 - [ ] **Step 3: Implement thin GUI around runner and review store** Worker signals update UI; no direct SQL/HTTP in widgets; export audited corrections and regenerate reconciliation.
 - [ ] **Step 4: Verify GREEN** Targeted suite then `python -m pytest`.
