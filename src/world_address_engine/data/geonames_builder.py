@@ -30,6 +30,12 @@ BATCH_SIZE = 10000
 # the immutable install rightly refuses to overwrite.
 PACK_FORMAT_VERSION = "k2"
 
+# The generation of the packs that were published before the format was
+# recorded. Those packs keep the punctuation of the source name in their
+# search keys, so the current reader cannot use them: it would look up
+# "st john s" and find nothing in a database that stores "st. john s".
+LEGACY_PACK_FORMAT_VERSION = "k1"
+
 _SEPARATORS = re.compile(r"[\W_]+", re.UNICODE)
 
 
@@ -186,20 +192,33 @@ def build_geonames_pack(source_dir: Path, target_db: Path, profile: str) -> dict
 
 
 def pack_manifest(profile: str, metrics: dict, source_archives: dict, source_date: str,
-                  db_sha256: str) -> dict:
+                  db_sha256: str, *, pack_format_version: str = PACK_FORMAT_VERSION,
+                  built_at: str | None = None,
+                  sqlite_version: str | None = None) -> dict:
     """Build a deterministic, registry-compatible manifest for a built pack.
 
-    `created_at` records the pinned source snapshot date rather than the build
-    clock, so a frozen source always yields byte-identical manifest bytes and
-    the published pack stays reproducible. `source_sha256` is a composite over
-    every source archive so that changing any one of them changes the pack
-    identity; `source_archives` keeps the per-archive detail.
+    `source_sha256` is a composite over every source archive so that changing
+    any one of them changes the pack identity; `source_archives` keeps the
+    per-archive detail.
 
     `pack_version` is the source snapshot date **and** the key format
     generation. The database bytes depend on both, so a pack that changed
     format has to change version as well: the published 2026-10-22 packs
     carry the punctuation bearing keys and must stay installable next to
     their replacement.
+
+    `pack_format_version` is an argument, never a module constant read at
+    manifest time: a manifest has to be a pure function of the report it was
+    derived from, otherwise the next key format bump silently relabels every
+    previously built pack. The generation is also written into the manifest
+    itself, so a reader can refuse a pack whose keys it cannot reach.
+
+    `created_at` is the pinned source snapshot date, and `built_at` is the
+    build clock when the caller knows it. `sqlite_version` records the writer
+    that produced the bytes: the writer version is part of the SQLite file, so
+    two builds of one source with different writers produce different bytes
+    under the same version string. Recording it makes that visible instead of
+    leaving it to be discovered as a checksum mismatch.
     """
     if profile not in PROFILES:
         raise ValueError("profile must be COMPACT_GLOBAL or EXTENDED_GLOBAL")
@@ -212,9 +231,12 @@ def pack_manifest(profile: str, metrics: dict, source_archives: dict, source_dat
     return {
         "pack_id": f"geonames-{profile.lower().replace('_', '-')}",
         "profile": profile,
-        "pack_version": f"{source_date}-{PACK_FORMAT_VERSION}",
+        "pack_version": f"{source_date}-{pack_format_version}",
+        "pack_format_version": pack_format_version,
         "schema_version": 1,
         "created_at": source_date,
+        "built_at": built_at,
+        "sqlite_version": sqlite_version,
         "source_date": source_date,
         "source_sha256": digest.hexdigest(),
         "db_sha256": db_sha256,

@@ -8,6 +8,12 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from world_address_engine.data.geonames_builder import (
+    LEGACY_PACK_FORMAT_VERSION,
+    PACK_FORMAT_VERSION,
+)
+from world_address_engine.sqlite_util import open_db
+
 REQUIRED = {
     "pack_id", "profile", "pack_version", "schema_version", "created_at",
     "source_date", "source_sha256", "db_sha256", "record_count",
@@ -16,6 +22,17 @@ REQUIRED = {
 
 PACK_DB_NAME = "pack.db"
 PACK_MANIFEST_NAME = "manifest.json"
+
+# The reader folds the punctuation of a name away, so it looks up
+# "st john s". A pack built by the legacy builder stores "st. john s", and
+# every lookup of a punctuated name would silently find nothing. The two
+# generations are told apart by the manifest when it declares one, and by
+# the keys themselves otherwise: a key that is plain printable ASCII but
+# carries something other than a lowercase letter, a digit or a space is a
+# punctuation bearing key of the legacy generation.
+LEGACY_KEY_PROBE = (
+    "SELECT 1 FROM geo_aliases WHERE search_key NOT GLOB '*[^ -~]*' "
+    "AND search_key GLOB '*[^a-z0-9 ]*' LIMIT 1")
 
 
 def _sha256(path: Path) -> str:
@@ -50,6 +67,49 @@ def verify_pack(db_path: Path, manifest_path: Path) -> bool:
 def canonical_manifest(manifest: dict) -> str:
     """Deterministic manifest text so the same inputs always produce the same bytes."""
     return json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+def manifest_format_version(manifest: dict) -> str:
+    """The key format generation a manifest declares, if it declares one."""
+    return str(manifest.get("pack_format_version") or "")
+
+
+def require_readable_pack(pack_db: Path) -> str:
+    """Refuse a pack whose search keys this reader cannot reach.
+
+    The reader folds the punctuation of a name away, so it looks up
+    "st john s". A pack of the legacy generation stores "st. john s", and
+    every lookup of a punctuated name would silently find nothing -- the run
+    would answer fewer questions than the caller asked, without ever saying
+    so. Such a pack is refused here instead.
+
+    The generation is read from the manifest when it declares one, and from
+    the keys themselves otherwise, so a pack without a manifest is checked
+    just as strictly as one with it.
+    """
+    pack_db = Path(pack_db)
+    manifest_path = pack_db.with_name(PACK_MANIFEST_NAME)
+    if manifest_path.is_file():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        declared = manifest_format_version(manifest)
+        if declared:
+            if declared != PACK_FORMAT_VERSION:
+                raise ValueError(
+                    f"the reference pack {pack_db} declares the search key "
+                    f"format {declared!r}, but this reader speaks "
+                    f"{PACK_FORMAT_VERSION!r}. The two cannot be mixed: a "
+                    f"lookup would silently find nothing.")
+            return declared
+    with open_db(pack_db) as conn:
+        legacy = conn.execute(LEGACY_KEY_PROBE).fetchone() is not None
+    if legacy:
+        raise ValueError(
+            f"the reference pack {pack_db} stores the legacy, punctuation "
+            f"bearing search keys (generation {LEGACY_PACK_FORMAT_VERSION!r}). "
+            f"This reader folds the punctuation away and would silently find "
+            f"nothing for every punctuated name. Install a pack of generation "
+            f"{PACK_FORMAT_VERSION!r}.")
+    return PACK_FORMAT_VERSION
 
 
 def write_manifest(manifest_path: Path, manifest: dict) -> Path:

@@ -11,6 +11,7 @@ import shutil
 from world_address_engine.io.delimited import iter_csv_records, iter_txt_records
 from world_address_engine.io.reports import write_reports
 from world_address_engine.io.xlsx import iter_xlsx_records
+from world_address_engine.data.pack_registry import require_readable_pack
 from world_address_engine.hkp.approval import CatalogueApproval, load_approval
 from world_address_engine.hkp.catalogue import approved_codes
 from world_address_engine.matching.classify import classify_record
@@ -264,6 +265,9 @@ def run_job(input_path: Path, output_dir: Path, geo_db: Path, hkp_db: Path,
         raise ValueError('max_batches must be positive')
     options = dict(input_options)
     approval = _load_approval(approval_manifest, approval_key, hkp_db)
+    # A pack whose search keys this reader cannot reach would answer fewer
+    # questions than the caller asked, without ever saying so.
+    require_readable_pack(geo_db)
     # Validate before creating state; never issue an approved mailing export
     # against merely syntactically validated, unofficial fixture code tables.
     cfg = _snapshot(input_path, geo_db, hkp_db, options, batch_size,
@@ -298,6 +302,7 @@ def resume_job(run_dir: Path, *, max_batches: int | None = None,
         raise ValueError('input source changed since checkpoint')
     if file_sha256(Path(cfg['geo_db'])) != cfg['geo_sha256']:
         raise ValueError('geo reference pack changed since checkpoint')
+    require_readable_pack(Path(cfg['geo_db']))
     if file_sha256(Path(cfg['hkp_db'])) != cfg['hkp_sha256']:
         raise ValueError('HKP reference catalogue changed since checkpoint')
     approval = _load_approval(
