@@ -1,7 +1,11 @@
 """Safe, intentionally conservative normalization of English and Chinese addresses.
 
-Chinese variants here are curated rather than global transliteration. The
-GeoNames index may also provide independently sourced Chinese aliases.
+Chinese variants here come from a small curated list and, when the optional
+pinned OpenCC package is installed, from a deterministic Traditional/Simplified
+conversion of the whole address. The conversion is a *variant of the same
+text*, never independent corroboration, and it never rewrites the input
+fields. The GeoNames index may also provide independently sourced Chinese
+aliases.
 """
 import re
 import unicodedata
@@ -11,6 +15,41 @@ _VARIANTS = (
     ('澳門', '澳门'), ('臺灣', '台湾'), ('中國', '中国'), ('香港', '香港'),
     ('東京', '东京'), ('東京都', '东京都'), ('新加坡', '新加坡'),
 )
+
+# The optional converter is loaded once and never reaches the network.
+_CONVERTERS: dict[str, object] = {}
+
+
+def _converter(kind: str):
+    """Load one pinned OpenCC converter, or ``None`` when it is absent."""
+    if kind in _CONVERTERS:
+        return _CONVERTERS[kind]
+    converter = None
+    try:
+        from opencc import OpenCC
+        converter = OpenCC(kind)
+    except Exception:
+        converter = None
+    _CONVERTERS[kind] = converter
+    return converter
+
+
+def _han_forms(base: str) -> list[str]:
+    """The Traditional and Simplified counterparts of a Han address."""
+    if not any('㐀' <= char <= '鿿' for char in base):
+        return []
+    forms: list[str] = []
+    for kind in ('t2s', 's2t'):
+        converter = _converter(kind)
+        if converter is None:
+            continue
+        try:
+            variant = converter.convert(base)
+        except Exception:
+            continue
+        if variant and variant != base:
+            forms.append(variant)
+    return forms
 
 
 def _key(text: str) -> str:
@@ -26,6 +65,7 @@ def normalize_address(value: str) -> tuple[str, ...]:
         for a, b in ((traditional, simplified), (simplified, traditional)):
             if a != b and a in base:
                 variants.append(base.replace(a, b))
+    variants.extend(_han_forms(base))
     return tuple(dict.fromkeys(variants))
 
 

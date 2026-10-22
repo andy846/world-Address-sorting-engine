@@ -235,12 +235,16 @@ def _latin_trailing_word(words, last: int) -> bool:
     A country name followed by another word belongs to an organisation or a
     street rather than to the address structure: "China Telecom", "London
     Road", "Hong Kong Airlines". A following number or postal code does not
-    make it a company name.
+    make it a company name, and neither does a postcode that starts with
+    letters: "Ireland D02" and "United Kingdom EC1A 1BB" are addresses.
     """
     if last + 1 >= len(words):
         return False
     following = words[last + 1][0]
     if not following[:1].isalpha():
+        return False
+    if any(char.isdigit() for char in following):
+        # A postal code or a unit number, not a company word.
         return False
     return following.casefold() not in TRAILING_EXEMPT
 

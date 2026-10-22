@@ -61,6 +61,9 @@ def geo(tmp_path_factory):
         _row(16, 'Denver', 'US', 'P', 'PPL', 'CO', 727211),
         _row(17, 'Marks', 'US', 'P', 'PPL', 'NY', 1200),
         _row(18, 'Spencer', 'US', 'P', 'PPL', 'NY', 1200),
+        _row(19, 'United States Minor Outlying Islands', 'UM', 'A', 'PCLI', '00', 300),
+        _row(20, 'Wake', 'UM', 'P', 'PPL', '01', 1000),
+        _row(21, 'Wake', 'US', 'P', 'PPL', 'NC', 100000),
     ]
     (source / 'allCountries.txt').write_text('\n'.join(rows) + '\n', encoding='utf8')
     (source / 'alternateNamesV2.txt').write_text(
@@ -139,3 +142,17 @@ def test_two_insignificant_place_tokens_do_not_assert_a_country(geo, master):
     result = classify('Marks & Spencer', geo, master)
     assert result.status != 'MATCHED'
     assert result.hkp_code is None
+
+
+# --- review P0-1: a country name that is only the start of a longer name
+
+def test_country_name_inside_a_longer_country_name_is_not_asserted(geo, master):
+    """'Wake, United States Minor Outlying Islands' is not the United States."""
+    result = classify('Wake, United States Minor Outlying Islands', geo, master)
+    assert result.status == 'REVIEW_CODE_MAPPING', result.reason
+    assert result.hkp_code is None
+
+
+def test_the_shorter_country_name_still_works_on_its_own(geo, master):
+    result = classify('Wake, United States', geo, master)
+    assert result.status == 'MATCHED' and result.hkp_code == 'US'
