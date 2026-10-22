@@ -181,3 +181,13 @@ def test_catalogue_without_an_approval_asserts_no_code(tmp_path):
     master = hkp(tmp_path)
     result = classify_record(rec('India'), geo(tmp_path), master.db_path)
     assert result.status == 'REVIEW_CODE_MAPPING' and result.hkp_code is None
+
+
+def test_a_missing_catalogue_mapping_keeps_the_resolved_country(tmp_path):
+    """A review must name the country it could not map."""
+    master = hkp(tmp_path)
+    result = classify(rec('Paris, France'), geo(tmp_path), master)
+    assert result.status == 'REVIEW_CODE_MAPPING'
+    assert result.hkp_code is None
+    assert 'GEOGRAPHY:FR' in result.evidence
+

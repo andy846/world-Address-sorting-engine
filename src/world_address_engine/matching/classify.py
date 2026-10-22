@@ -384,7 +384,13 @@ def classify_record(record: AddressRecord, geo_db: Path, hkp_db: Path,
         destination_id = catalogue.iso_to_destination.get(iso)
         code = catalogue.destination_codes.get(destination_id) if destination_id else None
         if not code:
-            return result('REVIEW_CODE_MAPPING', reason='GEOGRAPHY_HAS_NO_APPROVED_HKP_MAPPING')
+            # The geography was resolved, but the catalogue issues no code
+            # for it. The resolved country is kept in the evidence, so the
+            # reviewer sees *which* destination is missing instead of an
+            # anonymous review.
+            return result('REVIEW_CODE_MAPPING',
+                          reason='GEOGRAPHY_HAS_NO_APPROVED_HKP_MAPPING',
+                          evidence=(f'GEOGRAPHY:{iso}',))
         evidence = support.get(iso, 0.0)
         if evidence >= MIN_SUPPORT:
             return result('MATCHED', code, min(0.99, evidence), 'GEOGRAPHIC_EVIDENCE',
