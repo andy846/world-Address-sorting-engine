@@ -58,12 +58,17 @@ def build(source_dir: Path, output_dir: Path, profiles: list[str], compress: boo
         actual = db.stat().st_size
         if metrics["sqlite_bytes"] != actual:
             raise ValueError("Measured SQLite byte size differs from builder")
-        languages = metrics.pop("alias_count_by_language", {})
+        # The manifest needs the per language alias counts, the report needs
+        # them under their own name. The counts are therefore taken out of
+        # the metrics and handed to both explicitly.
+        languages = dict(metrics.pop("alias_count_by_language", {}))
         with open_db(db) as con:
             if con.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise ValueError("SQLite integrity verification failed")
         db_digest = sha256(db)
-        manifest = pack_manifest(profile, metrics, sources, source_date, db_digest)
+        manifest = pack_manifest(profile,
+                                 {**metrics, "alias_count_by_language": languages},
+                                 sources, source_date, db_digest)
         (output_dir / (profile.lower() + ".manifest.json")).write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8")
