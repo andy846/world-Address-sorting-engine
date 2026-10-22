@@ -11,6 +11,7 @@ dependencies = []
 
 [project.scripts]
 world-address-engine = "world_address_engine.cli:main"
+world-address-engine-gui = "world_address_engine.gui.app:main"
 
 [project.optional-dependencies]
 excel = ["openpyxl>=3.1,<4"]
