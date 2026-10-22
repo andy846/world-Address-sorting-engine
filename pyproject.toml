@@ -9,6 +9,9 @@ description = "Fully offline, Hongkong Post destination address classifier"
 requires-python = ">=3.12"
 dependencies = []
 
+[project.scripts]
+world-address-engine = "world_address_engine.cli:main"
+
 [project.optional-dependencies]
 excel = ["openpyxl>=3.1,<4"]
 gui = ["PySide6>=6.8,<7"]
