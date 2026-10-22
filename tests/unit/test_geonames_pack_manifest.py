@@ -67,7 +67,8 @@ def test_alias_language_labels_are_not_double_counted(tmp_path):
     make_sources(tmp_path)
     stats = build_geonames_pack(tmp_path, tmp_path / "geo.db", "EXTENDED_GLOBAL")
     languages = stats["alias_count_by_language"]
-    assert languages.get("source-latin", 0) >= 1
+    assert sum(languages.values()) == stats["alias_count"]
+    assert languages.get("en", 0) >= 1
     assert sum(v for k, v in languages.items() if k.startswith("zh")) >= 1
     assert "ru" not in languages
     assert "ja" not in languages

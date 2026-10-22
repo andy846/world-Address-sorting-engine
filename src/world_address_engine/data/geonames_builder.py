@@ -123,6 +123,12 @@ def build_geonames_pack(source_dir: Path, target_db: Path, profile: str) -> dict
                     batch.clear()
             if batch:
                 conn.executemany("INSERT INTO geo_places VALUES (?,?,?,?,?,?,?,?)", batch)
+            # Explicit alternate-name language tags are inserted first: the
+            # (place_id, search_key) uniqueness means the first insert wins, so
+            # the authoritative tag must not be overwritten by a derived label.
+            for cols in _lines(alternate_file):
+                if len(cols) >= 4 and cols[1].isdigit() and cols[2] in ALIAS_LANGS:
+                    _insert_alias(conn, int(cols[1]), cols[3], cols[2])
             # Original GeoNames name is accepted if it is Latin-script; for
             # Chinese territories, native Han name is acceptable as Chinese.
             for place_id, name, country in conn.execute("SELECT place_id, name, country_code FROM geo_places"):
@@ -135,9 +141,6 @@ def build_geonames_pack(source_dir: Path, target_db: Path, profile: str) -> dict
             for cols in _lines(main_file):
                 if len(cols) >= 3 and cols[0].isdigit() and _is_latin_word(cols[2]):
                     _insert_alias(conn, int(cols[0]), cols[2], "ascii")
-            for cols in _lines(alternate_file):
-                if len(cols) >= 4 and cols[1].isdigit() and cols[2] in ALIAS_LANGS:
-                    _insert_alias(conn, int(cols[1]), cols[3], cols[2])
             conn.execute("CREATE INDEX idx_geo_alias_key ON geo_aliases(search_key, place_id)")
             conn.execute("CREATE INDEX idx_geo_country_admin ON geo_places(country_code, admin1_code, admin2_code)")
             conn.commit()

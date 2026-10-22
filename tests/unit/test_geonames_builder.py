@@ -69,3 +69,25 @@ def test_packs_keep_same_destination_ids(tmp_path):
     build_geonames_pack(tmp_path, extended, "EXTENDED_GLOBAL")
     assert query(small, "SELECT country_code FROM geo_places WHERE place_id=1") == [("JP",)]
     assert query(extended, "SELECT country_code FROM geo_places WHERE place_id=1") == [("JP",)]
+
+
+def test_explicit_language_tag_wins_over_the_derived_label(tmp_path):
+    """An explicit 'en' alternate name must not be labelled 'source-latin'."""
+    make_sources(tmp_path)
+    db = tmp_path / "geo.db"
+    build_geonames_pack(tmp_path, db, "EXTENDED_GLOBAL")
+    assert query(db, "SELECT language FROM geo_aliases "
+                     "WHERE place_id=1 AND search_key='tokyo'") == [("en",)]
+    assert query(db, "SELECT language FROM geo_aliases "
+                     "WHERE place_id=2 AND search_key='shinjuku'") == [("en",)]
+
+
+def test_source_name_is_labelled_when_no_explicit_tag_exists(tmp_path):
+    (tmp_path / "allCountries.txt").write_text(
+        _row(1, "Springfield", "Springfield", "P", "PPL", "US", "IL") + "\n", encoding="utf-8")
+    (tmp_path / "alternateNamesV2.txt").write_text("", encoding="utf-8")
+    db = tmp_path / "geo.db"
+    build_geonames_pack(tmp_path, db, "EXTENDED_GLOBAL")
+    # No explicit tag exists, so the derived label must still describe the row.
+    assert query(db, "SELECT language FROM geo_aliases "
+                     "WHERE place_id=1 AND search_key='springfield'") == [("source-latin",)]
