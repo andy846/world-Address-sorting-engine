@@ -41,3 +41,14 @@ No network is required for preview; classification source/version integrity is s
 5. Run independently reviewed full regressions, 100k/1m/5m records tests, and packaged fully-offline Windows validation.
 
 **Do not merge or use this branch for live mailing production yet.**
+
+
+## 2026-10-23 — Task 11 resumable offline runner update
+
+Implemented Python run_job/resume_job, CLI classify/resume, atomic per-batch JSONL checkpoints with SHA256 filenames, input/HKP/GeoNames version fingerprinting, and manifest-last CSV reporting. Reference-data audit gate refuses production processing unless independently approved. Synthetic test mode requires an explicit --test-only flag, and exports are marked TEST_ONLY_UNVERIFIED.
+
+Local Python 3.13/Linux full regression: 70 passed; compileall passed. Integration checks cover 5-line CSV mapping, exact record count, source control preservation, summaries, ambiguous QC, pause/resume, modified sources/packs and tampered shard rejection, malformed CSV and mid-run file mutation. New/changed source and tests were uploaded to the GitHub development branch and their Git object SHAs checked.
+
+User-supplied AAAAA.csv was previewed locally: 9,604 records, 12 columns, zero decoding errors, one nonempty unnamed column. No actual private addresses or control numbers have been committed. A synthetic 6-record run paused after 3 and resumed successfully with TEST_ONLY_UNVERIFIED output.
+
+Remaining release gates: manually reviewed complete HKP destination catalogue, genuine GeoNames packs and size/accuracy measurements, stronger geopolitical/admin disambiguation, Windows GUI/QC, high-volume benchmark, proper plaintext-checkpoint retention protection, and independent security/code review.
