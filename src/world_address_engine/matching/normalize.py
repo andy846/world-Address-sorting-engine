@@ -38,7 +38,21 @@ def has_unsupported_script(value: str) -> bool:
 
 
 def contains_name(address: str, place_name: str) -> bool:
-    haystack, needle = _key(address), _key(place_name)
+    return contains_keyed(_key(address), place_name)
+
+
+def normalize_key(value: str) -> str:
+    """The normalised form used for name containment checks.
+
+    Exposed so a caller that tests many names against one address does not
+    re-normalise the address for every name.
+    """
+    return _key(value)
+
+
+def contains_keyed(haystack: str, place_name: str) -> bool:
+    """Containment against an already normalised address."""
+    needle = _key(place_name)
     if not needle or (needle.isascii() and needle.isalpha() and len(needle) <= 2):
         return False
     # Do not treat country-like aliases such as "IN" or "US" occurring
