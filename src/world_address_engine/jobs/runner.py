@@ -11,6 +11,7 @@ from world_address_engine.io.delimited import iter_csv_records, iter_txt_records
 from world_address_engine.io.reports import write_reports
 from world_address_engine.io.xlsx import iter_xlsx_records
 from world_address_engine.hkp.approval import CatalogueApproval, load_approval
+from world_address_engine.hkp.catalogue import approved_codes
 from world_address_engine.matching.classify import classify_record
 from world_address_engine.jobs.checkpoint import (
     atomic_json, commit_batch, committed_shards, file_sha256, iter_saved_pairs,
@@ -25,6 +26,71 @@ def _load_approval(manifest_path: Path | None, key_path: Path | None,
     if manifest_path is None or key_path is None:
         raise ValueError('an approval manifest and its key must be supplied together')
     return load_approval(manifest_path, key_path, hkp_db)
+
+
+# Bumped whenever the classification or reporting rules change. It is
+# recorded in every export so a result can be traced to the rules that
+# produced it.
+RULES_VERSION = '2026-10-23.3'
+
+
+def _code_validator(hkp_db: Path, approval: CatalogueApproval | None):
+    """Bind every exported code to the approved catalogue.
+
+    A checkpoint shard is local, writable data: its own digest lives in its
+    filename, so a tampered shard can be renamed with a matching digest. The
+    only trustworthy anchor is the approved catalogue, so every MATCHED row
+    is re-checked against it before anything is published.
+    """
+    codes = approved_codes(hkp_db, approval)
+
+    def validate(destination_id: str | None, code: str | None) -> bool:
+        return bool(destination_id) and codes.get(destination_id) == code
+
+    return validate
+
+
+def _catalogue_version(hkp_db: Path) -> str:
+    from world_address_engine.sqlite_util import open_db
+    try:
+        with open_db(hkp_db) as conn:
+            row = conn.execute('SELECT catalogue_version FROM metadata').fetchone()
+        return str(row[0]) if row else ''
+    except Exception:
+        return ''
+
+
+def _geo_pack_versions(geo_db: Path) -> str:
+    """The installed pack version, when the pack ships a manifest."""
+    manifest = Path(geo_db).with_name('manifest.json')
+    if manifest.is_file():
+        try:
+            data = json.loads(manifest.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            data = {}
+        version = data.get('pack_version')
+        if version:
+            return str(version)
+    return 'sha256:' + file_sha256(Path(geo_db))[:16]
+
+
+def _verify_shards(paths, cfg: dict, approval) -> None:
+    """Re-derive every committed result and compare it with the shard.
+
+    A shard is local, writable data. Its digest lives in its own filename,
+    so a tamperer can rename a rewritten shard with a matching digest. The
+    classification is deterministic, so re-running it over the committed
+    records is the only complete local defence against a forged result.
+    """
+    geo = Path(cfg['geo_db'])
+    hkp = Path(cfg['hkp_db'])
+    for record, result in iter_saved_pairs(paths):
+        again = classify_record(record, geo, hkp, approval)
+        if (again.status, again.hkp_code, again.destination_id) != (
+                result.status, result.hkp_code, result.destination_id):
+            raise ValueError(
+                f'checkpoint verification failed at record {record.record_no}: '
+                'the committed result does not match a fresh classification')
 
 
 def _records(input_path: Path, options: dict):
@@ -116,6 +182,8 @@ def _process(output_dir: Path, cfg: dict, *, max_batches: int | None = None,
             raise ValueError(f'{label} changed during classification; job incomplete')
     if output_dir.joinpath('Run_Manifest.json').exists():
         raise FileExistsError('completed job already exists')
+    if cfg.get('verify_shards'):
+        _verify_shards(paths, cfg, approval)
     manifest_meta = {
         'production_approved': bool(
             not cfg['allow_unverified_reference_data']
@@ -131,8 +199,14 @@ def _process(output_dir: Path, cfg: dict, *, max_batches: int | None = None,
         'geo_sha256': cfg['geo_sha256'],
         'hkp_sha256': cfg['hkp_sha256'],
         'batch_size': cfg['batch_size'],
+        'catalogue_version': _catalogue_version(Path(cfg['hkp_db'])),
+        'geo_pack_versions': _geo_pack_versions(Path(cfg['geo_db'])),
+        'rules_version': RULES_VERSION,
     }
-    counts = write_reports(iter_saved_pairs(paths), output_dir, manifest_meta)
+    counts = write_reports(iter_saved_pairs(paths), output_dir, manifest_meta,
+                           code_validator=_code_validator(Path(cfg['hkp_db']),
+                                                         approval),
+                           require_validated_codes=True)
     return counts
 
 
@@ -141,7 +215,8 @@ def run_job(input_path: Path, output_dir: Path, geo_db: Path, hkp_db: Path,
             max_batches: int | None = None,
             allow_unverified_reference_data: bool = False,
             approval_manifest: Path | None = None,
-            approval_key: Path | None = None) -> dict:
+            approval_key: Path | None = None,
+            verify_shards: bool = False) -> dict:
     """Start a new offline job. Explicit testing bypass leaves TEST_ONLY manifest."""
     input_path, output_dir, geo_db, hkp_db = map(Path, (input_path, output_dir, geo_db, hkp_db))
     if max_batches is not None and max_batches < 1:
@@ -153,6 +228,7 @@ def run_job(input_path: Path, output_dir: Path, geo_db: Path, hkp_db: Path,
     cfg = _snapshot(input_path, geo_db, hkp_db, options, batch_size,
                     allow_unverified_reference_data, approval,
                     approval_manifest, approval_key)
+    cfg['verify_shards'] = bool(verify_shards)
     state = output_dir / '.job-state'
     if state.exists() or output_dir.joinpath('Run_Manifest.json').exists():
         raise FileExistsError('existing job; use resume_job or a new output directory')
@@ -162,7 +238,8 @@ def run_job(input_path: Path, output_dir: Path, geo_db: Path, hkp_db: Path,
     return _process(output_dir, cfg, max_batches=max_batches, approval=approval)
 
 
-def resume_job(run_dir: Path, *, max_batches: int | None = None) -> dict:
+def resume_job(run_dir: Path, *, max_batches: int | None = None,
+               verify_shards: bool | None = None) -> dict:
     """Resume a paused/failed job ONLY if all source versions still match."""
     if max_batches is not None and max_batches < 1:
         raise ValueError('max_batches must be positive')
@@ -191,4 +268,6 @@ def resume_job(run_dir: Path, *, max_batches: int | None = None) -> dict:
             raise ValueError('a signed HKP approval manifest and key are required')
         if not approval.is_production:
             raise ValueError('the supplied HKP approval cannot authorise production')
+    if verify_shards is not None:
+        cfg['verify_shards'] = bool(verify_shards)
     return _process(output, cfg, max_batches=max_batches, approval=approval)

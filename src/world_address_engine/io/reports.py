@@ -18,8 +18,17 @@ from world_address_engine.models import AddressRecord, ClassificationResult, STA
 RESULT_FIELDS = (
     'Source_File', 'Source_Sheet', 'Source_Record_No', 'Record_ID',
     'HKP_Destination_Code', 'Classification_Status', 'Confidence_Score',
-    'Match_Reason', 'Destination_ID',
+    'Match_Method', 'Match_Evidence', 'Review_Reason',
+    'Destination_ID', 'Destination_Name_EN', 'Destination_Name_TC',
+    'HKP_Catalogue_Version', 'Geo_Pack_Versions', 'Rules_Version', 'Data_Class',
 )
+
+DATA_CLASS_PRODUCTION = 'PRODUCTION_APPROVED'
+DATA_CLASS_TEST_ONLY = 'TEST_ONLY_UNVERIFIED'
+
+
+class CodeApprovalError(ValueError):
+    """Raised when a row carries a destination code the catalogue does not issue."""
 
 
 def _protect(value: object) -> str:
@@ -37,13 +46,26 @@ def _hash(path: Path) -> str:
     return h.hexdigest()
 
 
+def _data_class(run_metadata: dict) -> str:
+    """The visible class of the export, so a test file is never mistaken
+    for a production mailing list."""
+    if run_metadata.get('data_approval') == 'INDEPENDENTLY_AUDITED':
+        return DATA_CLASS_PRODUCTION
+    return DATA_CLASS_TEST_ONLY
+
+
 def write_reports(items: Iterator[tuple[AddressRecord, ClassificationResult]],
-                  output_dir: Path, run_metadata: dict, *, machine_export: bool = False) -> dict[str,int]:
+                  output_dir: Path, run_metadata: dict, *, machine_export: bool = False,
+                  code_validator=None, require_validated_codes: bool = False) -> dict[str,int]:
     output_dir=Path(output_dir)
     output_dir.mkdir(parents=True,exist_ok=True)
     stage=Path(tempfile.mkdtemp(prefix='.run-',dir=output_dir))
     status_counts=Counter({status:0 for status in STATUSES})
     code_counts=Counter()
+    data_class=_data_class(run_metadata)
+    catalogue_version=str(run_metadata.get('catalogue_version','') or '')
+    geo_pack_versions=str(run_metadata.get('geo_pack_versions','') or '')
+    rules_version=str(run_metadata.get('rules_version','') or '')
     previous=0
     tracked=[]
     try:
@@ -72,14 +94,32 @@ def write_reports(items: Iterator[tuple[AddressRecord, ClassificationResult]],
                         raise ValueError('source schema changed inside job')
                     previous=record.record_no
                     status_counts[result.status]+=1
-                    if result.status=='MATCHED': code_counts[result.hkp_code]+=1
+                    if result.status=='MATCHED':
+                        if require_validated_codes and code_validator is None:
+                            raise CodeApprovalError(
+                                'a MATCHED row cannot be exported without a code validator')
+                        if code_validator is not None and not code_validator(
+                                result.destination_id, result.hkp_code):
+                            raise CodeApprovalError(
+                                f'row {result.record_no} carries a destination code the '
+                                'approved catalogue does not issue')
+                        code_counts[result.hkp_code]+=1
                     added={
                         'Source_File':Path(record.source_file).name, 'Source_Sheet':record.source_sheet or '',
                         'Source_Record_No':str(record.record_no),'Record_ID':record.record_id or '',
                         'HKP_Destination_Code':result.hkp_code or '',
                         'Classification_Status':result.status,
                         'Confidence_Score':str(result.confidence),
-                        'Match_Reason':result.reason, 'Destination_ID':result.destination_id or '',
+                        'Match_Method':result.reason if result.status=='MATCHED' else '',
+                        'Match_Evidence':'; '.join(result.evidence),
+                        'Review_Reason':'' if result.status=='MATCHED' else result.reason,
+                        'Destination_ID':result.destination_id or '',
+                        'Destination_Name_EN':result.destination_name_en,
+                        'Destination_Name_TC':result.destination_name_tc,
+                        'HKP_Catalogue_Version':catalogue_version,
+                        'Geo_Pack_Versions':geo_pack_versions,
+                        'Rules_Version':rules_version,
+                        'Data_Class':data_class,
                     }
                     original={**record.fields,**added}
                     protected={k:_protect(v) for k,v in original.items()}
@@ -90,16 +130,24 @@ def write_reports(items: Iterator[tuple[AddressRecord, ClassificationResult]],
                 if machine: machine.close()
         with (stage/'Country_Summary.csv').open('w',encoding='utf-8-sig',newline='') as report:
             writer=csv.writer(report)
-            writer.writerow(['HKP_Destination_Code','Count'])
-            writer.writerows(sorted(code_counts.items()))
+            writer.writerow(['HKP_Destination_Code','Count','Data_Class'])
+            for code,count in sorted(code_counts.items()):
+                writer.writerow([_protect(code),count,data_class])
         if sum(status_counts.values())!=previous or sum(code_counts.values())!=status_counts['MATCHED']:
             raise ValueError('statistics reconciliation failed')
-        files=sorted(p for p in stage.iterdir() if p.suffix=='.csv')
+        (stage/'DATA_CLASS.txt').write_text(
+            f'{data_class}\n\n'
+            f'This export is classified as {data_class}.\n'
+            'TEST_ONLY_UNVERIFIED output must not be used for real mailings or '
+            'for any postal decision.\n',
+            encoding='utf-8')
+        files=sorted(p for p in stage.iterdir() if p.suffix in ('.csv','.txt'))
         manifest={
             'run_status':'COMPLETE','total_records':previous,
             'status_counts':dict(sorted(status_counts.items())),
             'destination_counts':dict(sorted(code_counts.items())),
             'run_metadata':run_metadata,
+            'data_class':data_class,
             'export_mode':'EXCEL_SAFE_WITH_MACHINE_COPY' if machine_export else 'EXCEL_SAFE',
             'sha256':{p.name:_hash(p) for p in files},
         }

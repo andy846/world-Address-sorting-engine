@@ -142,3 +142,25 @@ def lookup_hkp_code(db_path: Path, destination_id: str, profile: str = SCHEME,
                                     source_checksum=source_checksum or ""):
         return None
     return code
+
+
+def approved_codes(db_path: Path, approval: CatalogueApproval | None = None) -> dict[str, str]:
+    """Every destination the approval lets the engine assert, and its code."""
+    with open_db(db_path) as conn:
+        rows = conn.execute(
+            """SELECT destination_id, code, source_url, source_doc_version, source_checksum
+               FROM destinations WHERE code_scheme='HKP_DESTINATION_2'
+               AND profile='HKP_DESTINATION_2' AND approval_status='APPROVED' """,
+        ).fetchall()
+    codes: dict[str, str] = {}
+    for destination_id, code, source_url, source_doc_version, source_checksum in rows:
+        if not re.fullmatch(r"[A-Z]{2}", code or ""):
+            continue
+        if approval is not None and not (
+                approval.allows(destination_id)
+                and approval.ratifies_source(source_url=source_url or "",
+                                             source_doc_version=source_doc_version or "",
+                                             source_checksum=source_checksum or "")):
+            continue
+        codes[destination_id] = code
+    return codes

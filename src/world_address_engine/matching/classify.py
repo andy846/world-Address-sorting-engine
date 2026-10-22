@@ -326,8 +326,13 @@ def _resolve_hint(hint: str | None, catalogue: _Catalogue) -> str | None:
 def classify_record(record: AddressRecord, geo_db: Path, hkp_db: Path,
                     approval: CatalogueApproval | None = None) -> ClassificationResult:
     """Classify one record against the reference pack and the HKP master."""
-    def result(status, code=None, confidence=0.0, reason='', destination_id=None):
-        return ClassificationResult(record.record_no, status, code, confidence, reason, destination_id)
+    def result(status, code=None, confidence=0.0, reason='', destination_id=None, evidence=()):
+        names = catalogue.names_by_destination.get(destination_id, ('', '', '')) \
+            if destination_id else ('', '', '')
+        return ClassificationResult(record.record_no, status, code, confidence, reason,
+                                    destination_id, evidence=tuple(evidence),
+                                    destination_name_en=names[0],
+                                    destination_name_tc=names[1])
 
     if record.input_error:
         return result('INPUT_ERROR', reason=record.input_error)
@@ -378,8 +383,10 @@ def classify_record(record: AddressRecord, geo_db: Path, hkp_db: Path,
             return result('REVIEW_CODE_MAPPING', reason='GEOGRAPHY_HAS_NO_APPROVED_HKP_MAPPING')
         evidence = support.get(iso, 0.0)
         if evidence >= MIN_SUPPORT:
-            return result('MATCHED', code, min(0.99, evidence), 'GEOGRAPHIC_EVIDENCE', destination_id)
-        return result('MATCHED', code, 0.98, 'EXPLICIT_DESTINATION', destination_id)
+            return result('MATCHED', code, min(0.99, evidence), 'GEOGRAPHIC_EVIDENCE',
+                          destination_id, evidence=sorted(terms.get(iso, set())))
+        return result('MATCHED', code, 0.98, 'EXPLICIT_DESTINATION', destination_id,
+                      evidence=sorted(terms.get(iso, set())))
 
     if len(assertions) > 1:
         return result('REVIEW_CONFLICT', reason='CONTRADICTORY_EXPLICIT_DESTINATIONS')

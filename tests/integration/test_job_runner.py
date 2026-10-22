@@ -7,6 +7,7 @@ import pytest
 
 from tests.unit.test_classify import hkp
 from tests.unit.test_retrieve import geo
+from world_address_engine.jobs.checkpoint import file_sha256
 from world_address_engine.jobs.runner import run_job, resume_job
 
 
@@ -64,9 +65,9 @@ def test_pause_resume_avoids_duplicate_records(tmp_path):
     assert [r['Source_Record_No'] for r in details] == ['1', '2', '3', '4', '5']
     assert len(details) == 5
     assert read(out / 'Country_Summary.csv') == [
-        {'HKP_Destination_Code':'IN', 'Count':'2'},
-        {'HKP_Destination_Code':'JP', 'Count':'2'},
-        {'HKP_Destination_Code':'MO', 'Count':'1'},
+        {'HKP_Destination_Code':'IN', 'Count':'2', 'Data_Class':'TEST_ONLY_UNVERIFIED'},
+        {'HKP_Destination_Code':'JP', 'Count':'2', 'Data_Class':'TEST_ONLY_UNVERIFIED'},
+        {'HKP_Destination_Code':'MO', 'Count':'1', 'Data_Class':'TEST_ONLY_UNVERIFIED'},
     ]
 
 
@@ -199,3 +200,85 @@ def test_invalid_max_batches_refused(tmp_path):
     data = tmp_path / 'sample.csv'; source(data, ['India'])
     with pytest.raises(ValueError, match='max_batches'):
         run(data, tmp_path / 'out', geo(tmp_path), hkp(tmp_path), {}, max_batches=0)
+
+
+def _rewrite_shard(shard: Path, mutate) -> Path:
+    """Rewrite a shard payload and rename it with a matching digest."""
+    lines = shard.read_text(encoding='utf-8').splitlines()
+    payloads = [json.loads(line) for line in lines]
+    payloads = [p for p in payloads if 'checkpoint_header' not in p]
+    mutate(payloads)
+    body = '\n'.join(json.dumps(p, ensure_ascii=False, separators=(',', ':'))
+                     for p in payloads) + '\n'
+    shard.write_text(body, encoding='utf-8', newline='\n')
+    start, end, _old = shard.name[:-len('.jsonl')].split('-')
+    digest = file_sha256(shard)
+    target = shard.with_name(f'{start}-{end}-{digest}.jsonl')
+    shard.rename(target)
+    return target
+
+
+def test_tampered_shard_with_an_unapproved_code_is_refused(tmp_path):
+    """Audit P1-4: a rewritten shard must not publish an invented code."""
+    data = tmp_path / 'sample.csv'
+    source(data, ['India'])
+    out = tmp_path / 'out'
+    master = hkp(tmp_path)
+    run(data, out, geo(tmp_path), master, {}, batch_size=1, max_batches=1,
+        allow_unverified_reference_data=True)
+    shard = next((out / '.job-state').glob('*.jsonl'))
+
+    def forge(payloads):
+        payloads[0]['result']['status'] = 'MATCHED'
+        payloads[0]['result']['hkp_code'] = 'ZZ'
+        payloads[0]['result']['destination_id'] = 'atlantis'
+        payloads[0]['result']['confidence'] = 0.99
+
+    _rewrite_shard(shard, forge)
+    with pytest.raises(ValueError, match='code|catalogue|validator|chain'):
+        resume_job(out)
+    assert not (out / 'Run_Manifest.json').exists()
+
+
+def test_tampered_shard_in_a_chain_is_detected(tmp_path):
+    """A rewritten shard breaks the hash chain of the shards that follow."""
+    data = tmp_path / 'sample.csv'
+    source(data, ['India', 'Japan', 'Macau'])
+    out = tmp_path / 'out'
+    master = hkp(tmp_path)
+    run(data, out, geo(tmp_path), master, {}, batch_size=1, max_batches=2,
+        allow_unverified_reference_data=True)
+    shard = sorted((out / '.job-state').glob('*.jsonl'))[0]
+
+    def forge(payloads):
+        payloads[0]['result']['status'] = 'MATCHED'
+        payloads[0]['result']['hkp_code'] = 'JP'
+        payloads[0]['result']['destination_id'] = 'japan'
+        payloads[0]['result']['confidence'] = 0.99
+
+    _rewrite_shard(shard, forge)
+    with pytest.raises(ValueError, match='chain|checksum|corrupt'):
+        resume_job(out)
+    assert not (out / 'Run_Manifest.json').exists()
+
+
+def test_shard_verification_re_derives_every_committed_result(tmp_path):
+    """With verification on, a forged but catalogue-valid code is caught."""
+    data = tmp_path / 'sample.csv'
+    source(data, ['India', 'Japan'])
+    out = tmp_path / 'out'
+    master = hkp(tmp_path)
+    run(data, out, geo(tmp_path), master, {}, batch_size=1, max_batches=1,
+        allow_unverified_reference_data=True)
+    shard = next((out / '.job-state').glob('*.jsonl'))
+
+    def forge(payloads):
+        payloads[0]['result']['status'] = 'MATCHED'
+        payloads[0]['result']['hkp_code'] = 'JP'
+        payloads[0]['result']['destination_id'] = 'japan'
+        payloads[0]['result']['confidence'] = 0.99
+
+    _rewrite_shard(shard, forge)
+    with pytest.raises(ValueError, match='verif|re-deriv|mismatch|chain'):
+        resume_job(out, verify_shards=True)
+    assert not (out / 'Run_Manifest.json').exists()

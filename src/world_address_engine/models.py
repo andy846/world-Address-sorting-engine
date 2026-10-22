@@ -60,6 +60,11 @@ class ClassificationResult:
     confidence: float
     reason: str
     destination_id: str | None
+    # The geographic terms that produced the decision, and the destination
+    # names from the approved catalogue. Both are audit output.
+    evidence: tuple[str, ...] = ()
+    destination_name_en: str = ""
+    destination_name_tc: str = ""
 
     def __post_init__(self) -> None:
         if self.record_no < 1 or self.status not in STATUSES or not 0 <= self.confidence <= 1:
@@ -68,3 +73,4 @@ class ClassificationResult:
             raise ValueError("non-MATCHED classification cannot assert HKP code")
         if self.status == "MATCHED" and (not self.hkp_code or not self.destination_id):
             raise ValueError("MATCHED classification requires a code and destination_id")
+        object.__setattr__(self, "evidence", tuple(self.evidence))

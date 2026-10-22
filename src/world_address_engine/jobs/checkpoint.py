@@ -15,6 +15,7 @@ from typing import Iterable, Iterator
 from world_address_engine.models import AddressRecord, ClassificationResult
 
 CHUNK_PATTERN = re.compile(r'^(\d{12})-(\d{12})-([0-9a-f]{64})\.jsonl$')
+HEADER_KEY = 'checkpoint_header'
 
 
 def file_sha256(path: Path) -> str:
@@ -49,6 +50,10 @@ def commit_batch(state_dir: Path, batch: list[tuple[AddressRecord, Classificatio
     tmp = Path(tmp_name)
     try:
         with os.fdopen(fd, 'w', encoding='utf8', newline='\n') as stream:
+            previous = _last_digest(state_dir)
+            stream.write(json.dumps({HEADER_KEY: {
+                'start': start, 'end': end, 'previous': previous,
+            }}, ensure_ascii=False, separators=(',', ':')) + '\n')
             for row, result in batch:
                 if row.record_no != result.record_no:
                     raise ValueError('result record ID mismatch')
@@ -74,6 +79,7 @@ def commit_batch(state_dir: Path, batch: list[tuple[AddressRecord, Classificatio
 def committed_shards(state_dir: Path) -> tuple[list[Path], int]:
     shards = sorted(state_dir.glob('*.jsonl'))
     expected = 1
+    previous_digest = None
     for shard in shards:
         match = CHUNK_PATTERN.fullmatch(shard.name)
         if not match:
@@ -83,8 +89,38 @@ def committed_shards(state_dir: Path) -> tuple[list[Path], int]:
             raise ValueError('corrupt checkpoint: missing, overlapping or out-of-order shard')
         if file_sha256(shard) != digest:
             raise ValueError('checkpoint checksum mismatch')
+        if _header_previous(shard) != previous_digest:
+            raise ValueError('checkpoint shard chain broken; the shard set was rewritten')
         expected = end + 1
+        previous_digest = digest
     return shards, expected - 1
+
+
+def _last_digest(state_dir: Path) -> str | None:
+    """The digest of the most recent committed shard, for the hash chain."""
+    shards = sorted(state_dir.glob('*.jsonl'))
+    if not shards:
+        return None
+    match = CHUNK_PATTERN.fullmatch(shards[-1].name)
+    return match.group(3) if match else None
+
+
+def _header_previous(shard: Path) -> str | None:
+    """The previous-shard digest recorded inside the shard's own header."""
+    try:
+        with shard.open(encoding='utf8') as stream:
+            first = stream.readline()
+    except OSError:
+        return None
+    try:
+        payload = json.loads(first)
+    except ValueError:
+        return None
+    header = payload.get(HEADER_KEY)
+    if not isinstance(header, dict):
+        return None
+    previous = header.get('previous')
+    return previous if isinstance(previous, str) else None
 
 
 def iter_saved_pairs(shards: Iterable[Path]) -> Iterator[tuple[AddressRecord, ClassificationResult]]:
@@ -93,6 +129,8 @@ def iter_saved_pairs(shards: Iterable[Path]) -> Iterator[tuple[AddressRecord, Cl
         with shard.open(encoding='utf8') as stream:
             for line in stream:
                 payload = json.loads(line)
+                if HEADER_KEY in payload:
+                    continue
                 record = AddressRecord(**payload['record'])
                 result = ClassificationResult(**payload['result'])
                 if record.record_no != previous + 1 or result.record_no != record.record_no:
