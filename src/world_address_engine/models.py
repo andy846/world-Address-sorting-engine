@@ -32,10 +32,24 @@ class DestinationCandidate:
     destination_id: str
     evidence: tuple[str, ...]
     score: float
+    # `support` is the raw, explainable evidence mass for this destination.
+    # `score` is the same value capped for reporting. Counting matched rows
+    # instead saturates on a global gazetteer, where one city name matches
+    # places in a dozen countries, so the aggregate is kept separately.
+    support: float = 0.0
+    token_count: int = 0
+    country_entity: bool = False
+    entity_terms: tuple[str, ...] = ()
+    # Per-term evidence mass: (search term, weight) pairs, heaviest first.
+    # The classifier needs the breakdown to withdraw evidence that turns out
+    # to belong to a company name rather than to a destination.
+    term_support: tuple[tuple[str, float], ...] = ()
 
     def __post_init__(self) -> None:
         if not self.destination_id or not 0 <= self.score <= 1:
             raise ValueError("candidate requires destination_id and score between 0 and 1")
+        if self.support < 0:
+            raise ValueError("candidate support cannot be negative")
 
 
 @dataclass(frozen=True, slots=True)

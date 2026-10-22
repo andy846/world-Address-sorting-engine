@@ -2,76 +2,327 @@
 
 Only reviewed HKP_DESTINATION_2 codes may be output, never ISO fallbacks.
 The confidence value is a heuristic, NOT calibrated postal accuracy.
+
+Three failure modes are treated as first-class defects rather than tuning
+problems:
+
+* a country that only appears inside a company name ("CHINA CONSTRUCTION LTD")
+  is not geographic evidence;
+* a lone city token is not a destination, so a springfield cannot pick a
+  country out of the gazetteer;
+* a structured country field that contradicts the address text is a conflict,
+  not a licence to emit the supplied country.
 """
+
+import re
+from dataclasses import dataclass, field
 from pathlib import Path
+
 from world_address_engine.models import AddressRecord, ClassificationResult
-from world_address_engine.matching.normalize import contains_name, normalize_address, has_unsupported_script
-from world_address_engine.matching.retrieve import retrieve_candidates
+from world_address_engine.matching.normalize import contains_name, has_unsupported_script, normalize_address
+from world_address_engine.matching.retrieve import MIN_SUPPORT, retrieve_candidates
 from world_address_engine.sqlite_util import open_db
 
+CODE_RE = re.compile(r"[A-Z]{2}")
 
-def _postal_catalogue(path: Path):
+# A rival destination within this share of the leader's evidence is a real
+# alternative, not noise.
+RIVAL_RATIO = 0.55
+
+# How far from the matched name a company marker still counts as adjacent.
+MARKER_WINDOW = 4
+MARKER_CHARS = 6
+
+LATIN_STRONG_MARKERS = frozenset({
+    "ltd", "limited", "ltda", "plc", "inc", "incorporated", "llc", "llp",
+    "corp", "corporation", "gmbh", "co", "company", "holdings", "holding",
+    "group", "enterprises", "industries", "trading", "logistics", "bank",
+    "agency", "ventures", "partners", "foundation", "association",
+    "institute", "investors", "sdn", "bhd", "pte",
+})
+LATIN_WEAK_MARKERS = frozenset({
+    "international", "services", "service", "industry", "express",
+    "technology", "technologies", "solutions", "consultants", "contractors",
+    "engineering", "investment", "capital", "realty", "estate", "estates",
+    "works", "mills", "factory", "factories", "distributors", "wholesale",
+    "retail", "enterprise", "constructions", "management", "consulting",
+})
+HAN_STRONG_MARKERS = (
+    "有限公司", "集團", "集团", "銀行", "银行", "公司", "股份", "實業", "实业",
+    "控股", "企業", "企业",
+)
+HAN_WEAK_MARKERS = (
+    "國際", "国际", "貿易", "贸易", "商貿", "商贸", "物流", "科技", "投資",
+    "投资", "製造", "制造", "運輸", "运输", "電子", "电子", "化工", "機械",
+    "机械", "建設", "建设", "發展", "发展", "進出口", "进出口",
+)
+
+_FRAGMENT_SPLIT = re.compile(r"[,;:\n\r，；、。]+")
+_WORD = re.compile(r"[A-Za-z0-9\u00c0-\u024f\u1e00-\u1eff]+")
+
+
+@dataclass(frozen=True)
+class _Catalogue:
+    """The approved HKP master and its ISO crosswalk."""
+
+    destination_codes: dict[str, str] = field(default_factory=dict)
+    destination_iso: dict[str, str] = field(default_factory=dict)
+    iso_to_destination: dict[str, str] = field(default_factory=dict)
+    names_by_iso: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    names_by_destination: dict[str, tuple[str, ...]] = field(default_factory=dict)
+
+
+def _catalogue(path: Path) -> _Catalogue:
+    """Read the approved catalogue and reject anything not fit to assert.
+
+    A code that is not two uppercase letters is never emitted, and an ISO
+    code claimed by more than one destination is never resolved.
+    """
     with open_db(path) as db:
-        rows=db.execute('''SELECT destination_id,code,name_en,name_zh_hant,name_zh_hans
-                           FROM destinations WHERE code_scheme='HKP_DESTINATION_2'
-                           AND profile='HKP_DESTINATION_2' AND approval_status='APPROVED' ''').fetchall()
-        iso=dict(db.execute('''SELECT code,destination_id FROM destinations
-                              WHERE code_scheme='ISO_ALPHA2' AND profile='ISO'
-                              AND approval_status='APPROVED' ''').fetchall())
-    codes={r[0]:r[1] for r in rows}
-    names={r[0]:(r[2],r[3],r[4]) for r in rows}
-    return codes,names,iso
+        rows = db.execute("""SELECT destination_id,code,name_en,name_zh_hant,name_zh_hans
+                              FROM destinations WHERE code_scheme='HKP_DESTINATION_2'
+                              AND profile='HKP_DESTINATION_2' AND approval_status='APPROVED' """).fetchall()
+        iso_rows = db.execute("""SELECT code,destination_id FROM destinations
+                                 WHERE code_scheme='ISO_ALPHA2' AND profile='ISO'
+                                 AND approval_status='APPROVED' """).fetchall()
+    destination_codes: dict[str, str] = {}
+    names_by_destination: dict[str, tuple[str, ...]] = {}
+    for destination_id, code, name_en, name_tc, name_sc in rows:
+        if not code or not CODE_RE.fullmatch(code):
+            continue
+        destination_codes[destination_id] = code
+        names_by_destination[destination_id] = (name_en or "", name_tc or "", name_sc or "")
+    iso_to_destination: dict[str, str] = {}
+    ambiguous: set[str] = set()
+    for code, destination_id in iso_rows:
+        if not code or not CODE_RE.fullmatch(code):
+            continue
+        if code in iso_to_destination and iso_to_destination[code] != destination_id:
+            ambiguous.add(code)
+        else:
+            iso_to_destination[code] = destination_id
+    for code in ambiguous:
+        iso_to_destination.pop(code, None)
+    destination_iso = {destination_id: code for code, destination_id in iso_to_destination.items()}
+    names_by_iso = {
+        destination_iso[destination_id]: names
+        for destination_id, names in names_by_destination.items()
+        if destination_id in destination_iso
+    }
+    return _Catalogue(destination_codes, destination_iso, iso_to_destination,
+                      names_by_iso, names_by_destination)
+
+
+def _is_han(text: str) -> bool:
+    return any("\u3400" <= char <= "\u9fff" for char in text)
+
+
+def _fragments(text: str) -> list[tuple[str, int]]:
+    """Split on separators that end a company or place phrase."""
+    parts: list[tuple[str, int]] = []
+    start = 0
+    for match in _FRAGMENT_SPLIT.finditer(text):
+        parts.append((text[start:match.start()], start))
+        start = match.end()
+    parts.append((text[start:], start))
+    return parts
+
+
+def _fragment_words(text: str) -> list[tuple[str, int, list[tuple[str, int, int]]]]:
+    result = []
+    for chunk, offset in _fragments(text):
+        words = [(m.group(0), offset + m.start(), offset + m.end()) for m in _WORD.finditer(chunk)]
+        result.append((chunk, offset, words))
+    return result
+
+
+def _latin_pattern(tokens: list[str]) -> re.Pattern[str]:
+    body = r"[\s\-_.'\u2019\u2018]*".join(re.escape(token) for token in tokens)
+    edge = r"[0-9A-Za-z\u00c0-\u024f\u1e00-\u1eff]"
+    return re.compile(r"(?<!" + edge + r")" + body + r"(?!" + edge + r")", re.IGNORECASE)
+
+
+def _latin_occurrences(scope: str, tokens: list[str]):
+    pattern = _latin_pattern(tokens)
+    for chunk, offset, words in _fragment_words(scope):
+        for match in pattern.finditer(chunk):
+            start = offset + match.start()
+            end = offset + match.end()
+            covered = [i for i, (_w, s, e) in enumerate(words) if s < end and e > start]
+            if covered:
+                yield words, covered[0], covered[-1]
+
+
+def _han_occurrences(scope: str, needle: str):
+    for chunk, _offset, _words in _fragment_words(scope):
+        index = chunk.find(needle)
+        while index >= 0:
+            yield chunk, index
+            index = chunk.find(needle, index + 1)
+
+
+def _latin_marker_near(words, first: int, last: int) -> bool:
+    folded = [word[0].casefold() for word in words]
+    low = max(0, first - MARKER_WINDOW)
+    high = min(len(folded) - 1, last + MARKER_WINDOW)
+    if any(folded[i] in LATIN_STRONG_MARKERS for i in range(low, high + 1)):
+        return True
+    if any(folded[i] in LATIN_WEAK_MARKERS for i in range(low, high + 1)):
+        return any(word in LATIN_STRONG_MARKERS for word in folded)
+    return False
+
+
+def _han_marker_near(chunk: str, index: int, length: int) -> bool:
+    before = chunk[max(0, index - MARKER_CHARS):index]
+    after = chunk[index + length:index + length + MARKER_CHARS]
+    if any(marker in before or marker in after for marker in HAN_STRONG_MARKERS):
+        return True
+    if any(marker in before or marker in after for marker in HAN_WEAK_MARKERS):
+        return any(marker in chunk for marker in HAN_STRONG_MARKERS)
+    return False
+
+
+def _is_company_adjacent(scope: str, needle: str) -> bool:
+    """True when every occurrence of `needle` belongs to a company name."""
+    if not needle:
+        return False
+    if _is_han(needle):
+        occurrences = list(_han_occurrences(scope, needle))
+        if not occurrences:
+            return False
+        return all(_han_marker_near(chunk, index, len(needle)) for chunk, index in occurrences)
+    tokens = needle.split()
+    if not tokens:
+        return False
+    occurrences = list(_latin_occurrences(scope, tokens))
+    if not occurrences:
+        return False
+    return all(_latin_marker_near(words, first, last) for words, first, last in occurrences)
+
+
+def _effective_support(candidates, scope: str):
+    """Evidence mass per destination after withdrawing company-name evidence."""
+    support: dict[str, float] = {}
+    tokens: dict[str, int] = {}
+    entity: dict[str, bool] = {}
+    for candidate in candidates:
+        suppressed = {term for term, _weight in candidate.term_support
+                      if _is_company_adjacent(scope, term)}
+        remaining = [(term, weight) for term, weight in candidate.term_support
+                     if term not in suppressed]
+        support[candidate.destination_id] = sum(weight for _term, weight in remaining)
+        tokens[candidate.destination_id] = len(remaining)
+        entity[candidate.destination_id] = bool(candidate.entity_terms) and any(
+            term not in suppressed for term in candidate.entity_terms)
+    return support, tokens, entity
+
+
+def _resolve_hint(hint: str | None, catalogue: _Catalogue) -> str | None:
+    """Map a structured country field to an ISO code, if it is trustworthy."""
+    if not hint:
+        return None
+    value = hint.strip()
+    if not value:
+        return None
+    upper = value.upper()
+    if len(upper) == 2 and CODE_RE.fullmatch(upper):
+        if upper in catalogue.iso_to_destination:
+            return upper
+        for destination_id, code in catalogue.destination_codes.items():
+            if code == upper:
+                return catalogue.destination_iso.get(destination_id)
+        return None
+    folded = value.casefold()
+    for destination_id, aliases in catalogue.names_by_destination.items():
+        for alias in aliases:
+            if alias and alias.casefold() == folded:
+                return catalogue.destination_iso.get(destination_id)
+    return None
 
 
 def classify_record(record: AddressRecord, geo_db: Path, hkp_db: Path) -> ClassificationResult:
-    def result(status, code=None, confidence=0., reason='', destination_id=None):
-        return ClassificationResult(record.record_no,status,code,confidence,reason,destination_id)
+    """Classify one record against the reference pack and the HKP master."""
+    def result(status, code=None, confidence=0.0, reason='', destination_id=None):
+        return ClassificationResult(record.record_no, status, code, confidence, reason, destination_id)
+
     if record.input_error:
-        return result('INPUT_ERROR',reason=record.input_error)
+        return result('INPUT_ERROR', reason=record.input_error)
     if not record.address_text.strip() and not record.country_hint:
-        return result('UNKNOWN',reason='EMPTY_ADDRESS')
+        return result('UNKNOWN', reason='EMPTY_ADDRESS')
     if has_unsupported_script(record.address_text):
-        return result('UNKNOWN',reason='UNSUPPORTED_LANGUAGE')
-    codes,names,iso=_postal_catalogue(Path(hkp_db))
-    # Avoid treating a company name such as "Hong Kong Holdings" on the
-    # recipient-name line as destination evidence when other lines exist.
-    lines=[s.strip() for s in record.address_text.splitlines() if s.strip()]
-    country_scope='\n'.join(lines[1:]) if len(lines)>1 else record.address_text
-    explicit=set()
-    for did, aliases in names.items():
+        return result('UNKNOWN', reason='UNSUPPORTED_LANGUAGE')
+
+    catalogue = _catalogue(Path(hkp_db))
+    # The first line of a multi-line address is the recipient, not a place.
+    lines = [line.strip() for line in record.address_text.splitlines() if line.strip()]
+    scope = '\n'.join(lines[1:]) if len(lines) > 1 else record.address_text
+
+    candidates = retrieve_candidates(Path(geo_db), normalize_address(scope), record.country_hint)
+    support, tokens, entity = _effective_support(candidates, scope)
+
+    assertions: dict[str, str] = {}
+    for iso, aliases in catalogue.names_by_iso.items():
         for alias in aliases:
-            if alias and contains_name(country_scope,alias):
-                explicit.add(did)
+            if alias and contains_name(scope, alias) and not _is_company_adjacent(scope, alias):
+                assertions[iso] = 'CATALOGUE_NAME'
                 break
-    if record.country_hint:
-        hint=record.country_hint.strip()
-        for did,code in codes.items():
-            if hint.upper()==code or any(hint.casefold()==v.casefold() for v in names[did] if v):
-                explicit.add(did)
-        if hint.upper() in iso:
-            explicit.add(iso[hint.upper()])
-    if len(explicit)>1:
-        return result('REVIEW_CONFLICT',reason='CONTRADICTORY_EXPLICIT_DESTINATIONS')
-    candidates=retrieve_candidates(Path(geo_db),normalize_address(record.address_text),record.country_hint)
-    if explicit:
-        did=next(iter(explicit))
-        # A destination with enough independently corroborated evidence
-        # from ANOTHER country indicates an actual conflicting address.
-        contradicting=[c for c in candidates if c.score>=.87 and iso.get(c.destination_id)!=did]
+    for candidate in candidates:
+        if entity.get(candidate.destination_id):
+            assertions.setdefault(candidate.destination_id, 'GEO_COUNTRY_ENTITY')
+    hint_iso = _resolve_hint(record.country_hint, catalogue)
+    if hint_iso:
+        assertions.setdefault(hint_iso, 'STRUCTURED_HINT')
+
+    def viable(iso: str) -> bool:
+        return (support.get(iso, 0.0) >= MIN_SUPPORT
+                and (tokens.get(iso, 0) >= 2 or entity.get(iso, False)))
+
+    def matched(iso: str):
+        destination_id = catalogue.iso_to_destination.get(iso)
+        code = catalogue.destination_codes.get(destination_id) if destination_id else None
+        if not code:
+            return result('REVIEW_CODE_MAPPING', reason='GEOGRAPHY_HAS_NO_APPROVED_HKP_MAPPING')
+        evidence = support.get(iso, 0.0)
+        if evidence >= MIN_SUPPORT:
+            return result('MATCHED', code, min(0.99, evidence), 'GEOGRAPHIC_EVIDENCE', destination_id)
+        return result('MATCHED', code, 0.98, 'EXPLICIT_DESTINATION', destination_id)
+
+    if len(assertions) > 1:
+        return result('REVIEW_CONFLICT', reason='CONTRADICTORY_EXPLICIT_DESTINATIONS')
+
+    if assertions:
+        target = next(iter(assertions))
+        evidence = support.get(target, 0.0)
+        if evidence >= MIN_SUPPORT:
+            rivals = [iso for iso in support
+                      if iso != target and support[iso] >= RIVAL_RATIO * evidence and viable(iso)]
+            if rivals:
+                return result('REVIEW_AMBIGUOUS', reason='MULTIPLE_STRONG_GEOGRAPHIC_DESTINATIONS')
+            return matched(target)
+        contradicting = [iso for iso, value in support.items()
+                         if iso != target and value >= MIN_SUPPORT]
         if contradicting:
-            return result('REVIEW_CONFLICT',reason='EXPLICIT_DESTINATION_CONFLICTS_WITH_GEOGRAPHY')
-        return result('MATCHED',codes[did],.98,'EXPLICIT_DESTINATION',did)
-    if not candidates:
-        return result('UNKNOWN',reason='NO_GEOGRAPHIC_MATCH')
-    best=candidates[0]
-    if best.score < .87:
-        if len(candidates)>1:
-            return result('REVIEW_AMBIGUOUS',reason='MULTIPLE_PLAUSIBLE_GEOGRAPHIC_DESTINATIONS')
-        return result('UNKNOWN',reason='SINGLE_PLACE_IS_NOT_ENOUGH')
-    runners=[c for c in candidates[1:] if c.score >= .87]
-    if runners:
-        return result('REVIEW_AMBIGUOUS',reason='MULTIPLE_STRONG_GEOGRAPHIC_DESTINATIONS')
-    did=iso.get(best.destination_id)
-    if not did or did not in codes:
-        return result('REVIEW_CODE_MAPPING',reason='GEOGRAPHY_HAS_NO_APPROVED_HKP_MAPPING')
-    return result('MATCHED',codes[did],best.score,'MULTIPLE_LINKED_GEOGRAPHIC_PLACES',did)
+            return result('REVIEW_CONFLICT', reason='EXPLICIT_DESTINATION_CONFLICTS_WITH_GEOGRAPHY')
+        return matched(target)
+
+    options = sorted((iso for iso in support if viable(iso)), key=lambda iso: (-support[iso], iso))
+    if not options:
+        # No destination carries enough evidence to be asserted. Several
+        # comparable destinations still mean "review this", while a single
+        # one only means "not enough evidence".
+        contenders = sorted((iso for iso, value in support.items() if value >= MIN_SUPPORT),
+                            key=lambda iso: (-support[iso], iso))
+        if len(contenders) > 1:
+            leader = contenders[0]
+            rivals = [iso for iso in contenders[1:]
+                      if support[iso] >= RIVAL_RATIO * support[leader]]
+            if rivals:
+                return result('REVIEW_AMBIGUOUS', reason='MULTIPLE_PLAUSIBLE_GEOGRAPHIC_DESTINATIONS')
+        if contenders:
+            return result('UNKNOWN', reason='SINGLE_PLACE_IS_NOT_ENOUGH')
+        return result('UNKNOWN', reason='NO_GEOGRAPHIC_MATCH')
+    leader = options[0]
+    rivals = [iso for iso in options[1:] if support[iso] >= RIVAL_RATIO * support[leader]]
+    if rivals:
+        return result('REVIEW_AMBIGUOUS', reason='MULTIPLE_PLAUSIBLE_GEOGRAPHIC_DESTINATIONS')
+    return matched(leader)
