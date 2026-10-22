@@ -163,13 +163,21 @@ def write_reports(items: Iterator[tuple[AddressRecord, ClassificationResult]],
         shutil.rmtree(stage,ignore_errors=True)
 
 
-def apply_review_corrections(output_dir: Path, decisions) -> dict[str,int]:
+def apply_review_corrections(output_dir: Path, decisions, *,
+                             approved_destination=None,
+                             require_validated_codes: bool = False) -> dict[str,int]:
     """Apply audited manual corrections to a published export.
 
     The export is streamed, so a multi-million row job is never held in
     memory. A correction applies to exactly one input record: rows that
     happen to share the same address keep their own result. The counts and
     the manifest are recomputed from the corrected file.
+
+    A manual decision is local, writable data. It may therefore only assert
+    a destination code that the approval in force actually issues, and it
+    may only do so when an approved lookup is supplied. ``Manual_Review.csv``
+    is regenerated from the corrected rows so the export never contradicts
+    itself.
     """
     output_dir=Path(output_dir)
     detail=output_dir/'Classified_Addresses.csv'
@@ -178,6 +186,30 @@ def apply_review_corrections(output_dir: Path, decisions) -> dict[str,int]:
     latest={}
     for decision in decisions:
         latest[int(decision.record_no)]=decision
+    # Validate every decision before a single byte is written, so a rejected
+    # correction leaves the published export untouched.
+    identities={}
+    for record_no, decision in latest.items():
+        if not decision.new_code:
+            continue
+        if require_validated_codes and approved_destination is None:
+            raise CodeApprovalError(
+                'a manual correction cannot be applied without an approved '
+                'catalogue lookup')
+        identity=None
+        if approved_destination is not None:
+            identity=approved_destination(decision.new_code)
+        if identity is None:
+            raise CodeApprovalError(
+                f'record {record_no} carries a destination code the approved '
+                'catalogue does not issue')
+        identities[record_no]=identity
+    manifest_path=output_dir/'Run_Manifest.json'
+    manifest=json.loads(manifest_path.read_text(encoding='utf-8')) \
+        if manifest_path.is_file() else {}
+    # The run manifest is the authority for the data class; the summary file
+    # may be empty when nothing was matched, and it is local writable data.
+    data_class=str(manifest.get('data_class') or 'TEST_ONLY_UNVERIFIED')
     stage=Path(tempfile.mkdtemp(prefix='.review-',dir=output_dir))
     try:
         code_counts=Counter()
@@ -186,42 +218,46 @@ def apply_review_corrections(output_dir: Path, decisions) -> dict[str,int]:
         applied=0
         with detail.open(encoding='utf-8-sig',newline='') as source:
             reader=csv.DictReader(source)
-            target_path=stage/'Classified_Addresses.csv'
-            with target_path.open('w',encoding='utf-8-sig',newline='') as target:
-                writer=csv.DictWriter(target,fieldnames=reader.fieldnames)
-                writer.writeheader()
+            names=list(reader.fieldnames or [])
+            with (stage/'Classified_Addresses.csv').open('w',encoding='utf-8-sig',newline='') as target, \
+                 (stage/'Manual_Review.csv').open('w',encoding='utf-8-sig',newline='') as manual:
+                writer=csv.DictWriter(target,fieldnames=names)
+                review=csv.DictWriter(manual,fieldnames=names)
+                writer.writeheader();review.writeheader()
                 for row in reader:
                     total+=1
                     decision=latest.get(int(row['Source_Record_No'] or 0))
                     if decision is not None and decision.new_code:
+                        identity=identities.get(int(row['Source_Record_No'] or 0))
                         row['HKP_Destination_Code']=decision.new_code
                         row['Classification_Status']=decision.new_status
                         row['Match_Method']='MANUAL_REVIEW'
-                        row['Match_Evidence']=decision.reason
+                        row['Match_Evidence']=_protect(decision.reason)
                         row['Review_Reason']=''
+                        if identity:
+                            row['Destination_ID']=identity.get('destination_id','')
+                            row['Destination_Name_EN']=identity.get('name_en','')
+                            row['Destination_Name_TC']=identity.get('name_tc','')
+                        row['Confidence_Score']='1.0'
                         applied+=1
                     status_counts[row['Classification_Status']]+=1
-                    if row['HKP_Destination_Code']:
-                        code_counts[row['HKP_Destination_Code']]+=1
+                    if row['Classification_Status']=='MATCHED':
+                        if row['HKP_Destination_Code']:
+                            code_counts[row['HKP_Destination_Code']]+=1
                     writer.writerow(row)
-        manifest_path=output_dir/'Run_Manifest.json'
-        manifest=json.loads(manifest_path.read_text(encoding='utf-8')) \
-            if manifest_path.is_file() else {}
-        # The run manifest is the authority for the data class; the summary
-        # file may be empty when nothing was matched.
-        data_class=str(manifest.get('data_class') or 'TEST_ONLY_UNVERIFIED')
-        summary=output_dir/'Country_Summary.csv'
-        if summary.is_file():
-            with summary.open(encoding='utf-8-sig',newline='') as stream:
-                for index,line in enumerate(csv.DictReader(stream)):
-                    if index==0:
-                        data_class=line.get('Data_Class') or data_class
+                    if row['Classification_Status']!='MATCHED':
+                        review.writerow(row)
+        if sum(status_counts.values())!=total:
+            raise ValueError('statistics reconciliation failed')
+        if sum(code_counts.values())!=status_counts['MATCHED']:
+            raise ValueError('destination reconciliation failed')
         with (stage/'Country_Summary.csv').open('w',encoding='utf-8-sig',newline='') as report:
             writer=csv.writer(report)
             writer.writerow(['HKP_Destination_Code','Count','Data_Class'])
             for code,count in sorted(code_counts.items()):
                 writer.writerow([_protect(code),count,data_class])
         os.replace(stage/'Classified_Addresses.csv',output_dir/'Classified_Addresses.csv')
+        os.replace(stage/'Manual_Review.csv',output_dir/'Manual_Review.csv')
         os.replace(stage/'Country_Summary.csv',output_dir/'Country_Summary.csv')
         if manifest:
             manifest['destination_counts']=dict(sorted(code_counts.items()))
@@ -233,8 +269,11 @@ def apply_review_corrections(output_dir: Path, decisions) -> dict[str,int]:
             })
             digests=manifest.get('sha256')
             if isinstance(digests,dict):
-                digests['Classified_Addresses.csv']=_hash(output_dir/'Classified_Addresses.csv')
-                digests['Country_Summary.csv']=_hash(output_dir/'Country_Summary.csv')
+                for name in ('Classified_Addresses.csv','Manual_Review.csv',
+                             'Country_Summary.csv','Review_Corrections.csv'):
+                    candidate=output_dir/name
+                    if candidate.is_file():
+                        digests[name]=_hash(candidate)
             manifest_path.write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
         return dict(code_counts)
     finally:
