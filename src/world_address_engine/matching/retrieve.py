@@ -57,6 +57,12 @@ MAX_EVIDENCE_ENTRIES = 20
 
 COUNTRY_FEATURE_CODES = frozenset({"PCLI", "PCLX", "PCLS", "PCLD"})
 
+# Chinese place names often carry an administrative suffix in the gazetteer
+# ('臺北市') that a written address leaves out ('臺北'). The suffix is only
+# appended when the plain name matched nothing at all, so a name that
+# already resolves is never made ambiguous.
+HAN_ADMIN_SUFFIXES = ("市", "縣", "区", "區", "鎮", "镇", "鄉", "乡", "省")
+
 # Address structure words are never geographic evidence on their own. A
 # multi-word place name that merely contains one of them ("Hyde Park") is
 # still searchable because a term is only dropped when *every* token is noise.
@@ -138,6 +144,13 @@ def _is_noise(word: str) -> bool:
 def _is_han_term(term: str) -> bool:
     """True when a search term contains a Han character."""
     return any("\u3400" <= char <= "\u9fff" for char in term)
+
+
+def _han_suffix_keys(term: str) -> list[str]:
+    """The gazetteer spellings of a Han name that carries an admin suffix."""
+    if len(term) < 2 or not _is_han_term(term):
+        return []
+    return [term + suffix for suffix in HAN_ADMIN_SUFFIXES]
 
 
 def _bounded_segments(address: str) -> tuple[str, ...]:
@@ -286,29 +299,50 @@ def retrieve_candidates(geo_db: Path, address_forms: tuple[str, ...],
     place_rows: dict[int, tuple[float, str, str, str]] = {}
     # place_id -> longest canonical term that matched it
     place_terms: dict[int, str] = {}
+    # every canonical term that produced evidence
+    matched_canonicals: set[str] = set()
 
     with open_db(geo_db) as db:
-        for chunk in _chunked(list(key_owner), QUERY_KEY_CHUNK):
-            statement = _ROW_SQL.format(placeholders=",".join("?" * len(chunk)))
-            per_key: dict[str, int] = defaultdict(int)
-            for row in db.execute(statement, chunk):
-                search_key = row[0]
-                if per_key[search_key] >= MAX_COUNTRIES_PER_TERM:
-                    continue
-                per_key[search_key] += 1
-                place_id, name, country, feature_class, feature_code, admin1, population = row[1:]
-                weight = _row_weight(feature_class, feature_code, admin1, population or 0)
-                if weight <= 0.0:
-                    continue
-                canonical = key_owner.get(search_key)
-                if canonical is None:
-                    continue
-                current = place_rows.get(place_id)
-                if current is None or weight > current[0]:
-                    place_rows[place_id] = (weight, name, country, feature_class)
-                known = place_terms.get(place_id)
-                if known is None or len(canonical) > len(known):
-                    place_terms[place_id] = canonical
+        def run_query(keys: list[str]) -> None:
+            """Look the keys up and fold the rows into the evidence."""
+            for chunk in _chunked(keys, QUERY_KEY_CHUNK):
+                statement = _ROW_SQL.format(placeholders=",".join("?" * len(chunk)))
+                per_key: dict[str, int] = defaultdict(int)
+                for row in db.execute(statement, chunk):
+                    search_key = row[0]
+                    if per_key[search_key] >= MAX_COUNTRIES_PER_TERM:
+                        continue
+                    per_key[search_key] += 1
+                    place_id, name, country, feature_class, feature_code, admin1, population = row[1:]
+                    weight = _row_weight(feature_class, feature_code, admin1, population or 0)
+                    if weight <= 0.0:
+                        continue
+                    canonical = key_owner.get(search_key)
+                    if canonical is None:
+                        continue
+                    matched_canonicals.add(canonical)
+                    current = place_rows.get(place_id)
+                    if current is None or weight > current[0]:
+                        place_rows[place_id] = (weight, name, country, feature_class)
+                    known = place_terms.get(place_id)
+                    if known is None or len(canonical) > len(known):
+                        place_terms[place_id] = canonical
+
+        run_query(list(key_owner))
+
+        # A Han name that matched nothing is retried with the administrative
+        # suffix the gazetteer uses. The retry only happens for a name that
+        # produced no evidence at all, so an unambiguous name keeps its
+        # precision.
+        suffix_keys: dict[str, str] = {}
+        for canonical in terms:
+            if canonical in matched_canonicals or not _is_han_term(canonical):
+                continue
+            for key in _han_suffix_keys(canonical):
+                suffix_keys.setdefault(key, canonical)
+        if suffix_keys:
+            key_owner.update(suffix_keys)
+            run_query(list(suffix_keys))
 
     # (canonical term, country) -> (weight, place_id)
     buckets: dict[tuple[str, str], tuple[float, int]] = {}

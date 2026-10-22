@@ -241,3 +241,40 @@ def test_input_text_is_length_bounded():
     assert bounded is not None, 'the reader must bound the input length'
     segments = bounded('a' * 500_000)
     assert sum(len(segment) for segment in segments) <= retrieve_module.MAX_FORM_CHARS
+
+
+def test_a_han_name_without_its_admin_suffix_is_still_found(tmp_path):
+    """'臺北' must reach the gazetteer entry '臺北市'.
+
+    GeoNames stores the Taiwanese and Chinese municipalities with their
+    administrative suffix, while a written address often leaves it out.
+    """
+    rows = [
+        _row(30, '臺北市', 'TW', pop=2500000),
+        _row(31, '臺灣', 'TW', 'A', 'PCLI', '00', 23000000),
+    ]
+    found = retrieve_candidates(geo(tmp_path, extra_rows=rows),
+                                normalize_address('臺北'), None)
+    assert found[0].destination_id == 'TW'
+
+
+def test_the_suffix_fallback_never_makes_a_known_name_ambiguous(tmp_path):
+    """A name that already resolves keeps its single answer."""
+    rows = [
+        _row(30, '中山', 'TW', pop=210000),
+        _row(31, '中山市', 'CN', pop=4500000),
+    ]
+    found = retrieve_candidates(geo(tmp_path, extra_rows=rows),
+                                normalize_address('中山'), None)
+    assert {c.destination_id for c in found} == {'TW'}
+
+
+def test_the_suffix_fallback_is_not_used_for_a_plain_latin_name(tmp_path):
+    """Only a Han name may be retried with an administrative suffix."""
+    rows = [
+        _row(30, 'Springfield', 'US', pop=170188),
+        _row(31, 'Springfield City', 'CA', pop=100000),
+    ]
+    found = retrieve_candidates(geo(tmp_path, extra_rows=rows),
+                                normalize_address('Springfield'), None)
+    assert {c.destination_id for c in found} == {'US', 'CA'}
