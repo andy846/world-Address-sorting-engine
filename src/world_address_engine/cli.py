@@ -1,6 +1,7 @@
-"""Read-only privacy-safe preview of production postal address files.
+"""Offline address input preview and conservative TEST-ONLY batch tooling.
 
-This command does NOT classify or modify addresses and needs no data packs.
+The preview command needs no data packs. Classification fails closed until an
+independently audited Hongkong Post reference master becomes available.
 """
 import argparse
 from collections import Counter
@@ -60,9 +61,38 @@ def main(argv: list[str] | None=None) -> int:
     scan.add_argument('--sheet')
     scan.add_argument('--txt-mode',choices=['line','delimited'],default='line')
     scan.add_argument('--delimiter')
+    classify = sub.add_parser('classify', help='Run offline classification (audited master required; --test-only for synthetic fixtures)')
+    classify.add_argument('--input', type=Path, required=True)
+    classify.add_argument('--output', type=Path, required=True)
+    classify.add_argument('--geo-db', type=Path, required=True)
+    classify.add_argument('--hkp-db', type=Path, required=True)
+    classify.add_argument('--encoding', default='utf-8-sig')
+    classify.add_argument('--address-column', action='append', default=[])
+    classify.add_argument('--record-id-column')
+    classify.add_argument('--sheet')
+    classify.add_argument('--txt-mode', choices=['line', 'delimited'], default='line')
+    classify.add_argument('--delimiter')
+    classify.add_argument('--batch-size', type=int, default=10000)
+    classify.add_argument('--max-batches', type=int)
+    classify.add_argument('--test-only', action='store_true', help='Explicitly mark the output TEST ONLY; no production postal use')
+    resume = sub.add_parser('resume', help='Resume a paused run with source and data-pack integrity checks')
+    resume.add_argument('--job-dir', type=Path, required=True)
+    resume.add_argument('--max-batches', type=int)
     args=parser.parse_args(argv)
     try:
-        report=preview(args.input,args.encoding,tuple(args.address_column),args.sheet,args.txt_mode,args.delimiter)
+        if args.command == 'preview':
+            report=preview(args.input,args.encoding,tuple(args.address_column),args.sheet,args.txt_mode,args.delimiter)
+        elif args.command == 'classify':
+            from world_address_engine.jobs.runner import run_job
+            options = {'encoding':args.encoding,'address_columns':args.address_column,
+                       'record_id_column':args.record_id_column,'sheet_name':args.sheet,
+                       'txt_mode':args.txt_mode,'delimiter':args.delimiter}
+            report=run_job(args.input,args.output,args.geo_db,args.hkp_db,options,
+                           batch_size=args.batch_size,max_batches=args.max_batches,
+                           allow_unverified_reference_data=args.test_only)
+        else:
+            from world_address_engine.jobs.runner import resume_job
+            report=resume_job(args.job_dir,max_batches=args.max_batches)
     except (ValueError,OSError,LookupError) as exc:
         print(f'Input preview failed: {exc}',file=sys.stderr)
         return 1
