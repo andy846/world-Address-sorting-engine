@@ -30,12 +30,12 @@ The sample was used ONLY for structural/integrity preview; no country codes are 
 
 Local Linux/Python 3.13 test-first verification: `python -m pytest -q` — **58 passed**; `python -m compileall -q src` — completed without compilation errors. Remote GitHub source/test blobs newly added were compared against local Git hash-object and matched.
 
-No network is required for preview; classification source/version integrity is separate and must be verified before launch. **No independent Subagent review, CI verification, Windows runtime test, official master audit, real GeoNames import, or actual delivery accuracy benchmark has happened.**
+No network is required for preview; classification source/version integrity is separate and must be verified before launch. **An independent Subagent review, a Windows runtime test and a real GeoNames import have now happened (see the dated sections below). CI verification, official master audit and actual delivery accuracy benchmark still have not.**
 
 ## Release blockers
 
 1. Verify full official current HKP two-letter code master with reviewed source mapping and service context, including territories differing from ISO.
-2. Build genuine GeoNames COMPACT/EXTENDED datasets and measure file sizes, matching quality, Chinese name coverage and rural-place recall.
+2. ~~Build genuine GeoNames COMPACT/EXTENDED datasets and measure file sizes.~~ **DONE for size and integrity** (real packs built, SHA-256 verified, measured in `docs/benchmarks.md`). **STILL OPEN:** matching quality, Chinese name coverage and rural-place recall need a labelled gold set.
 3. Fix all high-risk matching/alias ambiguities found from labeled real samples.
 4. Finish full batch runner, resume/checkpoint, QC/manual review interface, GUI, and end-to-end exports.
 5. Run independently reviewed full regressions, 100k/1m/5m records tests, and packaged fully-offline Windows validation.
@@ -52,3 +52,61 @@ Local Python 3.13/Linux full regression: 70 passed; compileall passed. Integrati
 User-supplied AAAAA.csv was previewed locally: 9,604 records, 12 columns, zero decoding errors, one nonempty unnamed column. No actual private addresses or control numbers have been committed. A synthetic 6-record run paused after 3 and resumed successfully with TEST_ONLY_UNVERIFIED output.
 
 Remaining release gates: manually reviewed complete HKP destination catalogue, genuine GeoNames packs and size/accuracy measurements, stronger geopolitical/admin disambiguation, Windows GUI/QC, high-volume benchmark, proper plaintext-checkpoint retention protection, and independent security/code review.
+
+## 2026-10-23 — Priority 0 and Priority 1 milestone (Codex)
+
+**Status: IN PROGRESS — STILL NOT PRODUCTION READY.** An independent security
+audit found three P0 defects, including a path that asserts a postal code for a
+destination that was never reviewed. See `docs/SECURITY_AUDIT_2026-10-23.md`.
+
+### Priority 0 — baseline and independent safety review
+
+- Baseline re-established on Windows 11 / Python 3.13.2 at commit `4fff20c`:
+  `python -m pytest -q` → 72 passed, 0 failed; `python -m compileall -q src
+  tools` → clean. The same suite was previously only ever run on Linux.
+- A Windows-only defect was found and fixed before any further work: `with
+  sqlite3.connect(...)` scopes the transaction, not the connection, so the file
+  handle stayed open and every reference-database install failed on Windows
+  with `WinError 32`. 37 tests failed for this single reason. Fixed in
+  `aa9c522`; all 72 then passed. A `windows-latest` CI job was added in
+  `4fff20c`, because both existing workflows ran only on `ubuntu-latest`.
+- Independent read-only subagent audit completed: 12 findings (3 × P0,
+  6 × P1, 3 × P2) plus a builder defect, with executable probes. Recorded in
+  `docs/SECURITY_AUDIT_2026-10-23.md` with file/line evidence and triage.
+
+### Priority 1 — the real worldwide databases are secured and verified
+
+Artifact `12447987288` (expiry 2026-10-29) and report artifact `12447817791`
+were downloaded from run `39827512415` before expiry and preserved locally
+under `builds/real-2026-10-22/` and `packs/`.
+
+- Artifact digest verified: `56a23683a48092c4055241b56b0762ee8aa86041831fbff74b393fc94a5ffef3`.
+- The archive contains **both** nested database packages, not a truncated
+  single database: `compact_global.sqlite.zip` 56,535,390 bytes and
+  `extended_global.sqlite.zip` 423,280,495 bytes.
+- Uncompressed SQLite SHA-256 matches the published fingerprints exactly:
+  `e3b8b710…faa2d2d` (COMPACT) and `fb0e4774…a2074a` (EXTENDED).
+- `PRAGMA integrity_check` returns `ok` for both. Schema, place counts, alias
+  counts, alias language distribution and index usage all match the build
+  report. 253 distinct countries; only `A` and `P` feature classes present.
+- Measured sizes: COMPACT 143,949,824 bytes (137.281 MiB), EXTENDED
+  1,098,661,888 bytes (1,047.766 MiB). Lookup p95 0.264 ms / 0.317 ms warm.
+  Full detail in `docs/benchmarks.md`.
+- **Builder/installer format mismatch fixed.** The builder published
+  `<profile>.sqlite` while `pack_registry` expected `pack.db` beside
+  `manifest.json`. Added deterministic per-pack manifests, `stage_pack`,
+  `install_pack` and `tools/install_reference_pack.py`; both real packs now
+  install offline, verify, and stay queryable.
+- New `tests/integration/test_real_geonames_packs.py`: 15 tests against the
+  real databases, skipped automatically when the artefacts are absent.
+
+### New blockers revealed by the real data
+
+- The prototype score model saturates on real data. In `EXTENDED_GLOBAL` the
+  single token `springfield` matches 68 place ids in `US`, 15 in `GB`, 12 in
+  `JM`, 9 in `AU`, 7 in `CA`, 5 in `ZA` and 4 in `IE`; `berlin` saturates
+  across 17 countries. Every one of those scores `0.99`, so the model can no
+  longer discriminate and a lone city token can still reach `MATCHED`.
+- Alias language provenance is lossy because of the `UNIQUE (place_id,
+  search_key)` constraint and insert order; the report understates real
+  English and Chinese coverage. Matching is unaffected.

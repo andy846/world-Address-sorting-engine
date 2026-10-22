@@ -5,6 +5,7 @@ City/administrative identifiers are preserved, while irrelevant feature types
 and unsupported-language alternates are omitted from the search index.
 """
 
+import hashlib
 import os
 import sqlite3
 import tempfile
@@ -68,7 +69,7 @@ def _compact_ids(path: Path) -> set[int]:
     return {int(parts[0]) for parts in _lines(path) if len(parts) >= 9 and parts[0].isdigit()}
 
 
-def build_geonames_pack(source_dir: Path, target_db: Path, profile: str) -> dict[str, int]:
+def build_geonames_pack(source_dir: Path, target_db: Path, profile: str) -> dict[str, object]:
     """Build GeoNames index from frozen, predownloaded allCountries and alternateNamesV2.
 
     In COMPACT_GLOBAL, include the cities1000 populated-place subset and every
@@ -146,7 +147,48 @@ def build_geonames_pack(source_dir: Path, target_db: Path, profile: str) -> dict
                 raise ValueError("GeoNames SQLite integrity_check failed")
             place_count = conn.execute("SELECT COUNT(*) FROM geo_places").fetchone()[0]
             alias_count = conn.execute("SELECT COUNT(*) FROM geo_aliases").fetchone()[0]
+            language_counts = dict(conn.execute(
+                "SELECT language, COUNT(*) FROM geo_aliases GROUP BY language"))
         os.replace(temporary_db, target_db)
-        return {"place_count": place_count, "alias_count": alias_count, "sqlite_bytes": target_db.stat().st_size}
+        return {"place_count": place_count, "alias_count": alias_count,
+                "sqlite_bytes": target_db.stat().st_size,
+                "alias_count_by_language": language_counts}
     finally:
         temporary_db.unlink(missing_ok=True)
+
+
+def pack_manifest(profile: str, metrics: dict, source_archives: dict, source_date: str,
+                  db_sha256: str) -> dict:
+    """Build a deterministic, registry-compatible manifest for a built pack.
+
+    `created_at` records the pinned source snapshot date rather than the build
+    clock, so a frozen source always yields byte-identical manifest bytes and
+    the published pack stays reproducible. `source_sha256` is a composite over
+    every source archive so that changing any one of them changes the pack
+    identity; `source_archives` keeps the per-archive detail.
+    """
+    if profile not in PROFILES:
+        raise ValueError("profile must be COMPACT_GLOBAL or EXTENDED_GLOBAL")
+    digest = hashlib.sha256()
+    for name in sorted(source_archives):
+        digest.update(name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(str(source_archives[name]["sha256"]).encode("utf-8"))
+        digest.update(b"\n")
+    return {
+        "pack_id": f"geonames-{profile.lower().replace('_', '-')}",
+        "profile": profile,
+        "pack_version": source_date,
+        "schema_version": 1,
+        "created_at": source_date,
+        "source_date": source_date,
+        "source_sha256": digest.hexdigest(),
+        "db_sha256": db_sha256,
+        "record_count": int(metrics["place_count"]),
+        "alias_count_by_language": dict(metrics["alias_count_by_language"]),
+        "attribution": "GeoNames (https://www.geonames.org/export/)",
+        "license": "CC BY 4.0",
+        "alias_count": int(metrics["alias_count"]),
+        "db_bytes": int(metrics["sqlite_bytes"]),
+        "source_archives": {name: dict(entry) for name, entry in source_archives.items()},
+    }

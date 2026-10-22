@@ -14,6 +14,9 @@ REQUIRED = {
     "alias_count_by_language", "attribution", "license",
 }
 
+PACK_DB_NAME = "pack.db"
+PACK_MANIFEST_NAME = "manifest.json"
+
 
 def _sha256(path: Path) -> str:
     sha = hashlib.sha256()
@@ -42,6 +45,56 @@ def verify_pack(db_path: Path, manifest_path: Path) -> bool:
     if _sha256(db_path) != manifest["db_sha256"]:
         raise ValueError("data pack checksum mismatch")
     return True
+
+
+def canonical_manifest(manifest: dict) -> str:
+    """Deterministic manifest text so the same inputs always produce the same bytes."""
+    return json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+def write_manifest(manifest_path: Path, manifest: dict) -> Path:
+    """Write a manifest atomically so a reader never sees a partial file."""
+    manifest_path = Path(manifest_path)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    pending = manifest_path.with_name(manifest_path.name + ".pending")
+    pending.write_text(canonical_manifest(manifest), encoding="utf-8")
+    os.replace(pending, manifest_path)
+    return manifest_path
+
+
+def stage_pack(db_path: Path, manifest: dict, staging_dir: Path) -> Path:
+    """Lay a built database out as an installable pack directory.
+
+    The GeoNames builder publishes `<profile>.sqlite`, while the installer
+    expects `pack.db` next to `manifest.json`. Staging reconciles the two and
+    refuses a payload whose bytes do not match the manifest checksum.
+    """
+    db_path, staging_dir = Path(db_path), Path(staging_dir)
+    if not db_path.is_file():
+        raise FileNotFoundError(db_path)
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    target = staging_dir / PACK_DB_NAME
+    if target.exists():
+        target.unlink()
+    try:
+        os.link(db_path, target)
+    except OSError:
+        shutil.copy2(db_path, target)
+    write_manifest(staging_dir / PACK_MANIFEST_NAME, manifest)
+    verify_pack(target, staging_dir / PACK_MANIFEST_NAME)
+    return staging_dir
+
+
+def install_pack(db_path: Path, manifest: dict, active_root: Path) -> Path:
+    """Stage a built database, then publish it as an immutable versioned pack."""
+    db_path, active_root = Path(db_path), Path(active_root)
+    active_root.mkdir(parents=True, exist_ok=True)
+    staging_dir = Path(tempfile.mkdtemp(prefix=".staging-", dir=active_root))
+    try:
+        stage_pack(db_path, manifest, staging_dir)
+        return activate_pack(staging_dir, active_root)
+    finally:
+        shutil.rmtree(staging_dir, ignore_errors=True)
 
 
 def activate_pack(staging_dir: Path, active_root: Path) -> Path:

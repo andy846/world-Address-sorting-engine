@@ -3,7 +3,15 @@ import json
 from pathlib import Path
 
 import pytest
-from world_address_engine.data.pack_registry import activate_pack, verify_pack
+from world_address_engine.data.pack_registry import (
+    PACK_DB_NAME,
+    PACK_MANIFEST_NAME,
+    activate_pack,
+    canonical_manifest,
+    install_pack,
+    stage_pack,
+    verify_pack,
+)
 
 
 def pack(tmp_path):
@@ -45,3 +53,62 @@ def test_manifest_fingerprints_fix_run_sources(tmp_path):
     assert verify_pack(installed / "pack.db", installed / "manifest.json")
     with pytest.raises(FileExistsError):
         activate_pack(installed, tmp_path / "packs")
+
+
+def manifest_fields(**overrides):
+    fields = {
+        "pack_id": "geonames-compact-global",
+        "profile": "COMPACT_GLOBAL",
+        "pack_version": "2026-10-22",
+        "schema_version": 1,
+        "created_at": "2026-10-22",
+        "source_date": "2026-10-22",
+        "source_sha256": "0" * 64,
+        "db_sha256": "0" * 64,
+        "record_count": 715567,
+        "alias_count_by_language": {"en": 59238},
+        "attribution": "GeoNames",
+        "license": "CC BY 4.0",
+    }
+    fields.update(overrides)
+    return fields
+
+
+def test_canonical_manifest_bytes_are_order_independent():
+    fields = manifest_fields()
+    reversed_fields = dict(reversed(list(fields.items())))
+    assert canonical_manifest(fields) == canonical_manifest(reversed_fields)
+    assert canonical_manifest(fields).endswith("\n")
+
+
+def test_stage_pack_lays_out_builder_output_as_installable_pack(tmp_path):
+    """The published builder emits <profile>.sqlite; the installer needs pack.db."""
+    built = tmp_path / "compact_global.sqlite"
+    built.write_bytes(b"built global sqlite payload")
+    digest = hashlib.sha256(built.read_bytes()).hexdigest()
+    staged = stage_pack(built, manifest_fields(db_sha256=digest), tmp_path / "staged")
+    assert (staged / PACK_DB_NAME).read_bytes() == b"built global sqlite payload"
+    assert (staged / PACK_MANIFEST_NAME).exists()
+    assert verify_pack(staged / PACK_DB_NAME, staged / PACK_MANIFEST_NAME)
+
+
+def test_install_pack_publishes_versioned_immutable_pack(tmp_path):
+    built = tmp_path / "compact_global.sqlite"
+    built.write_bytes(b"built global sqlite payload")
+    digest = hashlib.sha256(built.read_bytes()).hexdigest()
+    installed = install_pack(built, manifest_fields(db_sha256=digest), tmp_path / "packs")
+    assert installed.name == "geonames-compact-global-2026-10-22"
+    assert (installed / PACK_DB_NAME).read_bytes() == b"built global sqlite payload"
+    assert verify_pack(installed / PACK_DB_NAME, installed / PACK_MANIFEST_NAME)
+    with pytest.raises(FileExistsError):
+        install_pack(built, manifest_fields(db_sha256=digest), tmp_path / "packs")
+
+
+def test_install_pack_refuses_tampered_builder_output(tmp_path):
+    built = tmp_path / "compact_global.sqlite"
+    built.write_bytes(b"built global sqlite payload")
+    digest = hashlib.sha256(built.read_bytes()).hexdigest()
+    built.write_bytes(b"tampered payload")
+    with pytest.raises(ValueError, match="checksum"):
+        install_pack(built, manifest_fields(db_sha256=digest), tmp_path / "packs")
+    assert not list((tmp_path / "packs").glob("geonames-compact-global-*"))

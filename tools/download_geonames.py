@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 import tempfile
 from urllib.request import urlopen
@@ -30,7 +31,11 @@ def sha256(path: Path) -> str:
 def download_sources(source_dir: Path) -> dict:
     source_dir = Path(source_dir)
     source_dir.mkdir(parents=True, exist_ok=True)
-    manifest = {"source": "GeoNames", "license": "CC BY 4.0", "files": {}}
+    retrieved = datetime.now(timezone.utc)
+    manifest = {"source": "GeoNames", "license": "CC BY 4.0",
+                "retrieved_utc": retrieved.isoformat(),
+                "source_date": retrieved.date().isoformat(),
+                "files": {}}
     for filename in FILES:
         dest = source_dir / filename
         if not dest.exists():

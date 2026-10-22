@@ -18,7 +18,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
-from world_address_engine.data.geonames_builder import build_geonames_pack
+from world_address_engine.data.geonames_builder import build_geonames_pack, pack_manifest
 from world_address_engine.sqlite_util import open_db
 
 SOURCE = "https://download.geonames.org/export/dump/"
@@ -32,7 +32,8 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def build(source_dir: Path, output_dir: Path, profiles: list[str], compress: bool) -> dict:
+def build(source_dir: Path, output_dir: Path, profiles: list[str], compress: bool,
+          source_date: str | None = None) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     sources = {}
     for name in ("allCountries", "alternateNamesV2", "cities1000"):
@@ -44,9 +45,10 @@ def build(source_dir: Path, output_dir: Path, profiles: list[str], compress: boo
             raise FileNotFoundError("Missing official GeoNames source: " + name)
         sources[name] = {"filename": match.name, "bytes": match.stat().st_size,
                          "sha256": sha256(match), "url": SOURCE + match.name}
+    source_date = source_date or _source_date(source_dir)
     report = {"source": "GeoNames", "license": "CC BY 4.0",
               "source_url": SOURCE, "built_utc": datetime.now(timezone.utc).isoformat(),
-              "sources": sources, "profiles": {}}
+              "source_date": source_date, "sources": sources, "profiles": {}}
     for profile in profiles:
         filename = profile.lower() + ".sqlite"
         db = output_dir / filename
@@ -56,13 +58,18 @@ def build(source_dir: Path, output_dir: Path, profiles: list[str], compress: boo
         actual = db.stat().st_size
         if metrics["sqlite_bytes"] != actual:
             raise ValueError("Measured SQLite byte size differs from builder")
+        languages = metrics.pop("alias_count_by_language", {})
         with open_db(db) as con:
             if con.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise ValueError("SQLite integrity verification failed")
-            languages = dict(con.execute("SELECT language,COUNT(*) FROM geo_aliases GROUP BY language"))
+        db_digest = sha256(db)
+        manifest = pack_manifest(profile, metrics, sources, source_date, db_digest)
+        (output_dir / (profile.lower() + ".manifest.json")).write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8")
         detail = {"database": filename, **metrics,
                   "sqlite_mib": round(actual / 1048576, 3),
-                  "db_sha256": sha256(db), "alias_language_counts": languages}
+                  "db_sha256": db_digest, "alias_language_counts": languages}
         if compress:
             zipped = output_dir / (filename + ".zip")
             with zipfile.ZipFile(zipped, "w", compression=zipfile.ZIP_DEFLATED,
@@ -76,6 +83,17 @@ def build(source_dir: Path, output_dir: Path, profiles: list[str], compress: boo
     return report
 
 
+def _source_date(source_dir: Path) -> str:
+    """Prefer the pinned retrieval date recorded when the sources were fetched."""
+    manifest_path = Path(source_dir) / "source_manifest.json"
+    if not manifest_path.is_file():
+        raise ValueError("source_manifest.json required to pin the source date")
+    date = json.loads(manifest_path.read_text(encoding="utf-8")).get("source_date")
+    if not date:
+        raise ValueError("source_manifest.json has no source_date; pass --source-date")
+    return date
+
+
 def main():
     p = argparse.ArgumentParser(description="Build and MEASURE real GeoNames global SQLite files")
     p.add_argument("--source-dir", type=Path, required=True)
@@ -84,6 +102,7 @@ def main():
     p.add_argument("--profile", choices=["COMPACT_GLOBAL", "EXTENDED_GLOBAL"], default="COMPACT_GLOBAL")
     p.add_argument("--both", action="store_true")
     p.add_argument("--compress", action="store_true")
+    p.add_argument("--source-date", help="Pinned GeoNames snapshot date (YYYY-MM-DD)")
     a = p.parse_args()
     if a.output:
         if a.both: p.error("--both incompatible with --output")
@@ -91,7 +110,7 @@ def main():
     else:
         if a.output_dir is None: p.error("specify --output-dir")
         profiles = ["COMPACT_GLOBAL", "EXTENDED_GLOBAL"] if a.both else [a.profile]
-        answer = build(a.source_dir, a.output_dir, profiles, a.compress)
+        answer = build(a.source_dir, a.output_dir, profiles, a.compress, a.source_date)
     print(json.dumps(answer, ensure_ascii=False, indent=2))
 
 
