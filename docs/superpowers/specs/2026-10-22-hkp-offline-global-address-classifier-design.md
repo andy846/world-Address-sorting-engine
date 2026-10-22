@@ -1,6 +1,6 @@
 # World Address Sorting Engine — HK Post Offline Classification Design
 
-**Status:** Draft specification for user review. No application code has been written.
+**Status:** Architectural scope approved for implementation planning (2026-10-23); application code not started.
 **Date:** 2026-10-22
 **Repository:** andy846/world-Address-sorting-engine
 **Primary user goal:** Import very large numbers of international addresses and export one Hongkong Post destination code per address plus exact destination statistics.
@@ -9,7 +9,7 @@
 
 ## 1. Accepted brief and scope
 
-Build a production-oriented Windows Python application for overseas postal address classification. An operator selects a CSV, XLSX or TXT, maps one or more address columns, runs a batch, reviews uncertain cases, and exports original data with the HKP country/destination code and a summary by postal destination. Inputs may lack an explicit country name. Support English, traditional/simplified Chinese and transliterated international place names.
+Build a production-oriented Windows Python application for overseas postal address classification. An operator selects a CSV, XLSX or TXT, maps one or more address columns, runs a batch, reviews uncertain cases, and exports original data with the HKP country/destination code and a summary by postal destination. Inputs may lack an explicit country name. Only English, Traditional Chinese and Simplified Chinese address inputs are supported. International place names written with Latin letters remain supported as part of English-address processing; Japanese/Korean/Cyrillic/Arabic original-script input is outside V1 scope.
 
 Non-negotiable conditions:
 
@@ -51,6 +51,22 @@ Unknown/unmapped codes leave the code field empty; status and reason describe wh
 
 Every catalogue row must store source URL, document name/version, section, retrieved/reviewed dates, effective range if published, approval status and checksum. If current sources cannot be accessed or verified, their codes do not become automatically approved simply because they appear in a search result or old chart. HKP catalogue updates are versioned, reviewable, atomic, and independently tested.
 
+## 2A. Approved trilingual runtime and compact database policy (2026-10-23)
+
+**Runtime input languages: English, Traditional Chinese and Simplified Chinese ONLY.** Mixed English/Chinese lines and numeric/digit/postcode tokens are supported. Country, province, city and street tokens in unsupported scripts (e.g. pure Japanese kana/kanji-as-Japanese, Hangul, Cyrillic, Arabic) are not required in V1. If significant unsupported script content prevents reliable classification, do not invent a country; use UNKNOWN or REVIEW_AMBIGUOUS with review_reason UNSUPPORTED_LANGUAGE. Chinese Han ideographs occur across writing systems, so never infer that a Han token is necessarily Chinese; matching requires actual trusted name evidence.
+
+**Language filtering is on ALIAS entries, not the geographic IDs or postal destination catalogue.** Preserve place IDs, administrative ancestry, destination mappings and postcode relationships independently of name translations. Maintain official place names when English/Chinese and ASCII Romanized forms even for places with another native language. Latin-letter forms from GeoNames asciiname are necessary for English-rendered overseas addresses. Include vetted GeoNames alternate-name tags en, zh, zh-CN, zh-TW, zh-Hans and zh-Hant if present; review additional Chinese/Latin language tags explicitly rather than auto-importing all languages. Preserve vetted romanizations and the minimum disambiguation aliases needed to avoid false negatives. Strip web links, airport codes, historic/untrusted aliases and irrelevant feature classes unless manually approved and tested. Keep raw language labels and provenance.
+
+**Two local deployment profiles using the same HKP code master:**
+
+- COMPACT_GLOBAL: country/admin hierarchy plus curated populated places including major cities, administrative seats and a measured population-threshold subset (initial candidate source: GeoNames cities1000 + admin tables; exact rule recorded in pack manifest). Small towns below the threshold may be unresolved and must be REVIEW/UNKNOWN rather than silently dropped or misattributed.
+- EXTENDED_GLOBAL: the broader relevant GeoNames populated-place/admin hierarchy, retaining all supported-language/Latin aliases for those places. Do not copy irrelevant mountains/rivers/features into the production address index unless evidence shows they improve address inference. Larger installation and better rural/small-town recognition; recommended for postal production.
+- Optional COUNTRY_REGION street, postcode and building packs may install alongside either profile; no mandatory world-wide road/building store.
+
+**Variant normalization:** Index English case-folded forms and Chinese originals. Chinese Traditional/Simplified variants can be indexed with a pinned offline OpenCC-based converter or equivalent deterministic transform; it only generates alternative match candidates and must NOT rewrite original address fields or transform a name directly into country evidence. Log transform version. Include context-sensitive and geographically ambiguous Chinese name tests.
+
+**Actual size reduction is to be measured, not promised.** The GeoNames gazetteer stores place rows separately from many millions of language aliases. Excluding unused languages and irrelevant feature classes reduces alias/index footprints, but not the approved HKP destination list or geographic keys. The builder must generate both profiles from a single fixed upstream snapshot and report raw records, retained aliases by language, indexed place count, compressed package size, installed SQLite size (after ANALYZE/VACUUM), and lookup latency. Compare against an unfiltered ALL_LANG_ALIAS baseline to compute empirical size savings; do not invent a percentage. Report recall and precision trade-offs using EN/ZH-Hant/ZH-Hans gold datasets, with explicit small-town coverage.
+
 ## 3. Data and software architecture
 
 Recommended baseline: Python 3.12+, PySide6 Windows GUI, SQLite indexed data store (including optional FTS5 for candidate retrieval), openpyxl read-only Excel input, streaming CSV/TXT reader, pytest, optional PyInstaller release build.
@@ -58,7 +74,7 @@ Recommended baseline: Python 3.12+, PySide6 Windows GUI, SQLite indexed data sto
 Separate modules:
 
 - Input adapter and schema mapper: CSV, XLSX, TXT -> ordered logical address records.
-- Address normalizer: Unicode, encodings, punctuation, word segmentation, language aliases, abbreviations and multi-line joining; preserve unmodified input.
+- Address normalizer: Unicode, English/Traditional-Chinese/Simplified-Chinese matching, Latin-letter place-name transliteration, punctuation, selective Chinese variant conversion, abbreviations and multi-line joining; preserve unmodified input. Other original-script addresses return an explicit unsupported-language review reason.
 - Candidate retriever: indexed exact/alias city/admin/country/place lookup; never full scan of every global place per address.
 - Postal region validator: optional offline postcode patterns and country/admin/context; never infer a unique country from a generic postcode alone.
 - Evidence/scoring engine: geographic hierarchy consistency, conflict handling, explainable matches, calibration.
@@ -72,7 +88,7 @@ Suggested SQLite tables: hkp_destinations, hkp_destination_aliases, destination_
 
 ### Reference data packs
 
-Core global pack: reviewed HKP destinations, crosswalks, GeoNames worldwide countries/admin divisions/populated places/multilingual aliases, and curated name rules. GeoNames is strong for geography but not exhaustive for buildings. Optional region packs: postal patterns, OSM street/building data, OpenAddresses where redistribution is permitted. Permit incremental regional install without rebuilding the whole world pack.
+Core global packs: reviewed HKP destinations/crosswalks, GeoNames country and administrative hierarchy, populated-place records, and only permitted English/Traditional-Chinese/Simplified-Chinese plus Latin ASCII/transliteration aliases. A compact major-town profile and a more complete populated-place profile will be built from the same source snapshot. GeoNames is strong for geography but not exhaustive for buildings. Optional region packs: postal patterns, OSM street/building data, OpenAddresses where redistribution is permitted. Permit incremental regional install without rebuilding the whole world pack.
 
 Data preparation and production runtime are separate tools. Source manifest captures provenance URL, retrieval timestamp, license, attribution, checksum, schema transform version, record count and geographic coverage. GeoNames CC BY, OSM ODbL, and individual OpenAddresses license terms must be checked before packaging/distribution. No assumption that a global commercial-ready building database is freely available.
 
@@ -153,7 +169,7 @@ A test-first implementation must cover:
 6. Invalid/expired source packs, approved version pinning, source conflicts and service membership distinctions.
 7. Cancel/resume/crash at batch boundaries and atomic output writes.
 8. System network blocked: import, classify, review, export all work offline.
-9. Labeled multilingual gold-set evaluation, precision and review coverage, regression tests.
+9. Labeled English/Traditional-Chinese/Simplified-Chinese gold-set evaluation, precision and review coverage, regression tests.
 10. Clean Windows offline packaged build with all required data assets.
 
 Delivery stages after approval:
@@ -164,7 +180,7 @@ Delivery stages after approval:
 - Phase 3: large-job performance, reliable checkpoint/resume, Windows packaged release with full regression.
 - Phase 4: separate verified postal-service destination/zone profiles, production audit and operator rules.
 
-**Approval gate:** This file is the architectural specification. User review/approval is required before invoking Superpowers writing-plans or implementing product code. Next step after approval: implementation plan with exact tasks, tests, interfaces and order.
+**Approval record:** On 2026-10-23 the user authorized the next stage (Superpowers implementation planning) with a scope restriction to English, Traditional Chinese and Simplified Chinese. No product code until the resulting implementation plan is reviewed and the execution method is chosen.
 
 ## 8. Official source references checked 2026-10-22
 
