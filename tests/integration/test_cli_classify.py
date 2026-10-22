@@ -18,12 +18,15 @@ def _call(*args):
 def test_cli_classify_requires_explicit_test_only_for_fixtures(tmp_path):
     source = tmp_path / 'addresses.csv'
     source.write_text('Address,Control no\nIndia,0007\n', encoding='utf8')
+    master = hkp(tmp_path)
     args = ('classify', '--input', source, '--output', tmp_path / 'out',
-            '--geo-db', geo(tmp_path), '--hkp-db', hkp(tmp_path), '--address-column', 'Address')
+            '--geo-db', geo(tmp_path), '--hkp-db', master.db_path, '--address-column', 'Address')
     denied = _call(*args)
     assert denied.returncode != 0
-    assert 'not production approved' in denied.stderr
-    allowed = _call(*args, '--test-only')
+    assert 'approval manifest' in denied.stderr
+    allowed = _call(*args, '--test-only',
+                    '--approval-manifest', master.manifest_path,
+                    '--approval-key', master.key_path)
     assert allowed.returncode == 0, allowed.stderr
     result = json.loads(allowed.stdout)
     assert result['MATCHED'] == 1
@@ -31,13 +34,29 @@ def test_cli_classify_requires_explicit_test_only_for_fixtures(tmp_path):
     assert manifest['run_metadata']['data_approval'] == 'TEST_ONLY_UNVERIFIED'
 
 
+def test_cli_refuses_a_test_fixture_approval_for_a_production_run(tmp_path):
+    source = tmp_path / 'addresses.csv'
+    source.write_text('Address,Control no\nIndia,0007\n', encoding='utf8')
+    master = hkp(tmp_path)
+    denied = _call('classify', '--input', source, '--output', tmp_path / 'out',
+                   '--geo-db', geo(tmp_path), '--hkp-db', master.db_path,
+                   '--address-column', 'Address',
+                   '--approval-manifest', master.manifest_path,
+                   '--approval-key', master.key_path)
+    assert denied.returncode != 0
+    assert 'test fixture' in denied.stderr
+
+
 def test_cli_resume_from_paused_job(tmp_path):
     source = tmp_path / 'addresses.csv'
     source.write_text('Address,Control no\nIndia,001\nJapan,002\nMacau,003\n', encoding='utf8')
+    master = hkp(tmp_path)
     first = _call('classify','--input',source,'--output',tmp_path/'out',
-                  '--geo-db',geo(tmp_path),'--hkp-db',hkp(tmp_path),
+                  '--geo-db',geo(tmp_path),'--hkp-db',master.db_path,
                   '--address-column','Address','--batch-size','2',
-                  '--max-batches','1','--test-only')
+                  '--max-batches','1','--test-only',
+                  '--approval-manifest',master.manifest_path,
+                  '--approval-key',master.key_path)
     assert first.returncode == 0, first.stderr
     assert json.loads(first.stdout)['run_status'] == 'PAUSED'
     assert not (tmp_path / 'out' / 'Run_Manifest.json').exists()

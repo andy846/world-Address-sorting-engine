@@ -2,6 +2,10 @@
 
 An operator must review the complete sourced postal master before production.
 Sample rows used in tests are not an authoritative/current national inventory.
+
+The catalogue file is *data*, never authority. A code is resolvable only when
+a separately signed approval manifest ratifies both the destination and the
+official document the row was taken from.
 """
 
 import csv
@@ -14,6 +18,7 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from world_address_engine.hkp.approval import CatalogueApproval
 from world_address_engine.sqlite_util import open_db
 
 SCHEME = "HKP_DESTINATION_2"
@@ -67,8 +72,8 @@ def import_hkp_catalogue(source_csv: Path, manifest_json: Path, db_path: Path) -
     temporary_db = Path(tempfile_name)
     try:
         with open_db(temporary_db) as conn:
-            conn.execute("CREATE TABLE metadata (catalogue_version TEXT NOT NULL, csv_sha256 TEXT NOT NULL)")
-            conn.execute("INSERT INTO metadata VALUES (?, ?)", (meta["catalogue_version"], digest))
+            conn.execute("""CREATE TABLE metadata (catalogue_version TEXT NOT NULL,
+                             csv_sha256 TEXT NOT NULL, row_count INTEGER NOT NULL)""")
             conn.execute("""CREATE TABLE destinations (
                 destination_id TEXT NOT NULL, code_scheme TEXT NOT NULL,
                 code TEXT NOT NULL, name_en TEXT NOT NULL, name_zh_hant TEXT NOT NULL,
@@ -97,6 +102,10 @@ def import_hkp_catalogue(source_csv: Path, manifest_json: Path, db_path: Path) -
                     except sqlite3.IntegrityError as exc:
                         raise ValueError("conflict or duplicate destination mapping") from exc
                     count += 1
+            conn.execute(
+                "INSERT INTO metadata VALUES (?, ?, ?)",
+                (meta["catalogue_version"], digest, count),
+            )
             conn.execute("CREATE INDEX destinations_by_scheme ON destinations (code_scheme, profile, approval_status)")
             conn.commit()
         os.replace(temporary_db, db_path)
@@ -105,14 +114,31 @@ def import_hkp_catalogue(source_csv: Path, manifest_json: Path, db_path: Path) -
         temporary_db.unlink(missing_ok=True)
 
 
-def lookup_hkp_code(db_path: Path, destination_id: str, profile: str = SCHEME) -> str | None:
-    """Never substitute a different code scheme, even if destination exists."""
-    if profile != SCHEME:
+def lookup_hkp_code(db_path: Path, destination_id: str, profile: str = SCHEME,
+                    approval: CatalogueApproval | None = None) -> str | None:
+    """Never substitute a different code scheme, even if destination exists.
+
+    Without a verified approval no code is ever returned: the catalogue file
+    cannot approve itself.
+    """
+    if profile != SCHEME or approval is None:
+        return None
+    if not approval.allows(destination_id):
         return None
     with open_db(db_path) as conn:
         row = conn.execute(
-            """SELECT code FROM destinations WHERE destination_id=?
+            """SELECT code, source_url, source_doc_version, source_checksum
+               FROM destinations WHERE destination_id=?
                AND code_scheme=? AND profile=? AND approval_status='APPROVED'""",
             (destination_id, SCHEME, profile),
         ).fetchone()
-        return row[0] if row else None
+    if not row:
+        return None
+    code, source_url, source_doc_version, source_checksum = row
+    if not re.fullmatch(r"[A-Z]{2}", code or ""):
+        return None
+    if not approval.ratifies_source(source_url=source_url or "",
+                                    source_doc_version=source_doc_version or "",
+                                    source_checksum=source_checksum or ""):
+        return None
+    return code

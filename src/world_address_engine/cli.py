@@ -74,10 +74,16 @@ def main(argv: list[str] | None=None) -> int:
     classify.add_argument('--delimiter')
     classify.add_argument('--batch-size', type=int, default=10000)
     classify.add_argument('--max-batches', type=int)
+    classify.add_argument('--approval-manifest', type=Path,
+                          help='Signed HKP approval manifest (required outside --test-only)')
+    classify.add_argument('--approval-key', type=Path,
+                          help='Key for the approval manifest; keep it outside the repository')
     classify.add_argument('--test-only', action='store_true', help='Explicitly mark the output TEST ONLY; no production postal use')
     resume = sub.add_parser('resume', help='Resume a paused run with source and data-pack integrity checks')
     resume.add_argument('--job-dir', type=Path, required=True)
     resume.add_argument('--max-batches', type=int)
+    resume.add_argument('--approval-manifest', type=Path)
+    resume.add_argument('--approval-key', type=Path)
     args=parser.parse_args(argv)
     try:
         if args.command == 'preview':
@@ -89,7 +95,9 @@ def main(argv: list[str] | None=None) -> int:
                        'txt_mode':args.txt_mode,'delimiter':args.delimiter}
             report=run_job(args.input,args.output,args.geo_db,args.hkp_db,options,
                            batch_size=args.batch_size,max_batches=args.max_batches,
-                           allow_unverified_reference_data=args.test_only)
+                           allow_unverified_reference_data=args.test_only,
+                           approval_manifest=args.approval_manifest,
+                           approval_key=args.approval_key)
         else:
             from world_address_engine.jobs.runner import resume_job
             report=resume_job(args.job_dir,max_batches=args.max_batches)

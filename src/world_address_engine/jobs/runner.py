@@ -1,7 +1,8 @@
 """Offline streaming classifier with version-pinned, resumable output shards.
 
-This is a TEST-ONLY pipeline until an independently reviewed HKP master is
-integrated. It refuses a production run in the current catalogue schema.
+Production runs require a separately signed HKP approval manifest whose key
+is held outside the repository. Without one the run is refused; the
+catalogue database can never approve itself.
 """
 from pathlib import Path
 import json
@@ -9,21 +10,21 @@ import json
 from world_address_engine.io.delimited import iter_csv_records, iter_txt_records
 from world_address_engine.io.reports import write_reports
 from world_address_engine.io.xlsx import iter_xlsx_records
+from world_address_engine.hkp.approval import CatalogueApproval, load_approval
 from world_address_engine.matching.classify import classify_record
-from world_address_engine.sqlite_util import open_db
 from world_address_engine.jobs.checkpoint import (
     atomic_json, commit_batch, committed_shards, file_sha256, iter_saved_pairs,
 )
 
 
-def _hkp_audited(db_path: Path) -> bool:
-    """Fail closed for older and fixture catalogues lacking audit approval."""
-    with open_db(db_path) as con:
-        cols = {row[1] for row in con.execute('PRAGMA table_info(metadata)')}
-        if 'production_approved' not in cols:
-            return False
-        row = con.execute('SELECT production_approved FROM metadata').fetchone()
-        return bool(row and row[0] == 1)
+def _load_approval(manifest_path: Path | None, key_path: Path | None,
+                   hkp_db: Path) -> CatalogueApproval | None:
+    """Load the signed approval, or fail closed when it is absent."""
+    if manifest_path is None and key_path is None:
+        return None
+    if manifest_path is None or key_path is None:
+        raise ValueError('an approval manifest and its key must be supplied together')
+    return load_approval(manifest_path, key_path, hkp_db)
 
 
 def _records(input_path: Path, options: dict):
@@ -44,14 +45,20 @@ def _records(input_path: Path, options: dict):
 
 
 def _snapshot(input_path: Path, geo_db: Path, hkp_db: Path, options: dict, batch_size: int,
-              testing: bool) -> dict:
+              testing: bool, approval: CatalogueApproval | None,
+              approval_manifest: Path | None, approval_key: Path | None) -> dict:
     for p in (input_path, geo_db, hkp_db):
         if not p.is_file():
             raise FileNotFoundError(p)
     if batch_size < 1 or batch_size > 100_000:
         raise ValueError('batch_size must be 1 to 100000')
-    if not testing and not _hkp_audited(hkp_db):
-        raise ValueError('HKP master not production approved; unverified reference data refused')
+    if not testing:
+        if approval is None:
+            raise ValueError(
+                'a signed HKP approval manifest and key are required for a production run')
+        if not approval.is_production:
+            raise ValueError(
+                'the supplied HKP approval is a test fixture and cannot authorise production')
     return {
         'input_path': str(input_path.resolve()),
         'geo_db': str(geo_db.resolve()),
@@ -62,11 +69,17 @@ def _snapshot(input_path: Path, geo_db: Path, hkp_db: Path, options: dict, batch
         'input_options': options,
         'batch_size': batch_size,
         'allow_unverified_reference_data': testing,
+        'approval_id': approval.approval_id if approval else None,
+        'approval_scope': approval.scope if approval else None,
+        'approval_manifest_sha256': approval.manifest_sha256 if approval else None,
+        'approval_manifest_path': str(Path(approval_manifest).resolve()) if approval_manifest else None,
+        'approval_key_path': str(Path(approval_key).resolve()) if approval_key else None,
         'schema_version': 1,
     }
 
 
-def _process(output_dir: Path, cfg: dict, *, max_batches: int | None = None) -> dict:
+def _process(output_dir: Path, cfg: dict, *, max_batches: int | None = None,
+             approval: CatalogueApproval | None = None) -> dict:
     state = output_dir / '.job-state'
     paths, last_committed = committed_shards(state)
     source = Path(cfg['input_path'])
@@ -80,7 +93,7 @@ def _process(output_dir: Path, cfg: dict, *, max_batches: int | None = None) -> 
             continue
         if record.record_no != last_committed + len(batch) + 1:
             raise ValueError('nonsequential source record')
-        result = classify_record(record, geo, hkp)
+        result = classify_record(record, geo, hkp, approval)
         batch.append((record, result))
         if len(batch) >= cfg['batch_size']:
             commit_batch(state, batch)
@@ -104,8 +117,16 @@ def _process(output_dir: Path, cfg: dict, *, max_batches: int | None = None) -> 
     if output_dir.joinpath('Run_Manifest.json').exists():
         raise FileExistsError('completed job already exists')
     manifest_meta = {
-        'production_approved': not cfg['allow_unverified_reference_data'],
-        'data_approval': 'TEST_ONLY_UNVERIFIED' if cfg['allow_unverified_reference_data'] else 'INDEPENDENTLY_AUDITED',
+        'production_approved': bool(
+            not cfg['allow_unverified_reference_data']
+            and cfg.get('approval_scope') == 'PRODUCTION'),
+        'data_approval': ('TEST_ONLY_UNVERIFIED'
+                          if cfg['allow_unverified_reference_data']
+                          or cfg.get('approval_scope') != 'PRODUCTION'
+                          else 'INDEPENDENTLY_AUDITED'),
+        'approval_id': cfg.get('approval_id'),
+        'approval_scope': cfg.get('approval_scope'),
+        'approval_manifest_sha256': cfg.get('approval_manifest_sha256'),
         'input_sha256': cfg['input_sha256'],
         'geo_sha256': cfg['geo_sha256'],
         'hkp_sha256': cfg['hkp_sha256'],
@@ -118,23 +139,27 @@ def _process(output_dir: Path, cfg: dict, *, max_batches: int | None = None) -> 
 def run_job(input_path: Path, output_dir: Path, geo_db: Path, hkp_db: Path,
             input_options: dict, batch_size: int = 10_000, *,
             max_batches: int | None = None,
-            allow_unverified_reference_data: bool = False) -> dict:
+            allow_unverified_reference_data: bool = False,
+            approval_manifest: Path | None = None,
+            approval_key: Path | None = None) -> dict:
     """Start a new offline job. Explicit testing bypass leaves TEST_ONLY manifest."""
     input_path, output_dir, geo_db, hkp_db = map(Path, (input_path, output_dir, geo_db, hkp_db))
     if max_batches is not None and max_batches < 1:
         raise ValueError('max_batches must be positive')
     options = dict(input_options)
+    approval = _load_approval(approval_manifest, approval_key, hkp_db)
     # Validate before creating state; never issue an approved mailing export
     # against merely syntactically validated, unofficial fixture code tables.
     cfg = _snapshot(input_path, geo_db, hkp_db, options, batch_size,
-                    allow_unverified_reference_data)
+                    allow_unverified_reference_data, approval,
+                    approval_manifest, approval_key)
     state = output_dir / '.job-state'
     if state.exists() or output_dir.joinpath('Run_Manifest.json').exists():
         raise FileExistsError('existing job; use resume_job or a new output directory')
     output_dir.mkdir(parents=True, exist_ok=True)
     state.mkdir()
     atomic_json(state / 'config.json', cfg)
-    return _process(output_dir, cfg, max_batches=max_batches)
+    return _process(output_dir, cfg, max_batches=max_batches, approval=approval)
 
 
 def resume_job(run_dir: Path, *, max_batches: int | None = None) -> dict:
@@ -154,6 +179,16 @@ def resume_job(run_dir: Path, *, max_batches: int | None = None) -> dict:
         raise ValueError('geo reference pack changed since checkpoint')
     if file_sha256(Path(cfg['hkp_db'])) != cfg['hkp_sha256']:
         raise ValueError('HKP reference catalogue changed since checkpoint')
-    if not cfg['allow_unverified_reference_data'] and not _hkp_audited(Path(cfg['hkp_db'])):
-        raise ValueError('HKP master not production approved')
-    return _process(output, cfg, max_batches=max_batches)
+    approval = _load_approval(
+        Path(cfg['approval_manifest_path']) if cfg.get('approval_manifest_path') else None,
+        Path(cfg['approval_key_path']) if cfg.get('approval_key_path') else None,
+        Path(cfg['hkp_db']))
+    if approval is not None and cfg.get('approval_manifest_sha256') \
+            and approval.manifest_sha256 != cfg['approval_manifest_sha256']:
+        raise ValueError('HKP approval manifest changed since checkpoint')
+    if not cfg['allow_unverified_reference_data']:
+        if approval is None:
+            raise ValueError('a signed HKP approval manifest and key are required')
+        if not approval.is_production:
+            raise ValueError('the supplied HKP approval cannot authorise production')
+    return _process(output, cfg, max_batches=max_batches, approval=approval)

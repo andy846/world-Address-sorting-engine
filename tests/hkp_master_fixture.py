@@ -3,16 +3,33 @@
 This is a synthetic fixture for automated tests. It is NOT the verified
 Hongkong Post master and must never be presented as one: the codes and names
 below are placeholders that exercise the mapping and conflict logic.
+
+The fixture is signed with a `TEST_FIXTURE` scope key, so it can exercise the
+code-resolution path but can never authorise a production run.
 """
 
 import csv
 import hashlib
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
+from world_address_engine.hkp.approval import (
+    SCOPE_TEST_FIXTURE,
+    CatalogueApproval,
+    load_approval,
+    sign_manifest,
+)
 from world_address_engine.hkp.catalogue import import_hkp_catalogue
 
 SOURCE_URL = 'https://ec-ship.hongkongpost.hk/platform/data/imailZoneChart_v2.pdf'
+SOURCE_DOC_VERSION = 'test-fixture-2026-10-23'
+SOURCE_SECTION = 'test-fixture-not-official'
+# Stand-in bytes for the official document. A real master must carry the
+# SHA-256 of the genuine Hongkong Post document it was taken from.
+FIXTURE_SOURCE_DOCUMENT = b'test fixture stand-in; not an official Hongkong Post document'
+SOURCE_SHA256 = hashlib.sha256(FIXTURE_SOURCE_DOCUMENT).hexdigest()
+FIXTURE_KEY = b'test-fixture-approval-key-0123456789abcdef'
 
 # destination_id, ISO alpha-2, HKP two-letter code, name_en, name_zh_hant, name_zh_hans
 COUNTRIES = [
@@ -55,8 +72,20 @@ COUNTRIES = [
 ]
 
 
-def build_master(directory: Path) -> Path:
-    """Write and import the test master, returning the SQLite lookup path."""
+@dataclass(frozen=True)
+class ApprovedMaster:
+    """A built, signed test master and the approval that unlocks it."""
+
+    db_path: Path
+    csv_path: Path
+    manifest_path: Path
+    key_path: Path
+    approval: CatalogueApproval
+
+
+def build_master(directory: Path, *, scope: str = SCOPE_TEST_FIXTURE,
+                 key: bytes = FIXTURE_KEY, countries=None) -> ApprovedMaster:
+    """Write, import and sign the test master."""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     csv_path = directory / 'hkp_test_master.csv'
@@ -66,12 +95,12 @@ def build_master(directory: Path) -> Path:
     with csv_path.open('w', encoding='utf-8', newline='') as stream:
         writer = csv.DictWriter(stream, fieldnames=fields)
         writer.writeheader()
-        for destination_id, iso, postal, name_en, name_tc, name_sc in COUNTRIES:
+        for destination_id, iso, postal, name_en, name_tc, name_sc in (countries or COUNTRIES):
             common = dict(destination_id=destination_id, name_en=name_en, name_zh_hant=name_tc,
                           name_zh_hans=name_sc, source_url=SOURCE_URL,
-                          source_doc_version='test-fixture-2026-10-23',
-                          source_section='test-fixture-not-official',
-                          source_checksum='test-fixture-not-official',
+                          source_doc_version=SOURCE_DOC_VERSION,
+                          source_section=SOURCE_SECTION,
+                          source_checksum=SOURCE_SHA256,
                           approval_status='APPROVED', date_verified='2026-10-23')
             writer.writerow(dict(common, code_scheme='HKP_DESTINATION_2',
                                  profile='HKP_DESTINATION_2', code=postal))
@@ -83,4 +112,27 @@ def build_master(directory: Path) -> Path:
     }), encoding='utf-8')
     db_path = directory / 'hkp_test_master.db'
     import_hkp_catalogue(csv_path, manifest, db_path)
-    return db_path
+    approval_payload = {
+        'approval_id': 'test-fixture-approval-2026-10-23',
+        'scope': scope,
+        'catalogue_version': 'test-fixture-2026-10-23',
+        'csv_sha256': hashlib.sha256(csv_path.read_bytes()).hexdigest(),
+        'row_count': len(countries or COUNTRIES) * 2,
+        'catalogue_db_sha256': hashlib.sha256(db_path.read_bytes()).hexdigest(),
+        'approved_destinations': [row[0] for row in (countries or COUNTRIES)],
+        'approved_sources': [{
+            'source_url': SOURCE_URL,
+            'source_doc_version': SOURCE_DOC_VERSION,
+            'source_section': SOURCE_SECTION,
+            'source_sha256': SOURCE_SHA256,
+        }],
+    }
+    signed = sign_manifest(approval_payload, key)
+    manifest_path = directory / 'hkp_test_master.approval.json'
+    manifest_path.write_text(json.dumps(signed, ensure_ascii=False, indent=2), encoding='utf-8')
+    key_path = directory / 'hkp_test_master.approval.key'
+    key_path.write_bytes(key)
+    approval = load_approval(manifest_path, key_path, db_path)
+    return ApprovedMaster(db_path=db_path, csv_path=csv_path,
+                          manifest_path=manifest_path, key_path=key_path,
+                          approval=approval)

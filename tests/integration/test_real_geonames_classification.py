@@ -40,7 +40,7 @@ def _pack(name):
 
 def _classify(address, hint, geo, hkp):
     record = AddressRecord(1, 'sample.csv', None, '0001', {'Address': address}, address, hint)
-    return classify_record(record, geo, hkp)
+    return classify_record(record, geo, hkp.db_path, hkp.approval)
 
 
 MATCHED = [

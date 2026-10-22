@@ -18,6 +18,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from world_address_engine.hkp.approval import CatalogueApproval
 from world_address_engine.models import AddressRecord, ClassificationResult
 from world_address_engine.matching.normalize import contains_name, has_unsupported_script, normalize_address
 from world_address_engine.matching.retrieve import MIN_SUPPORT, retrieve_candidates
@@ -72,14 +73,17 @@ class _Catalogue:
     names_by_destination: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
-def _catalogue(path: Path) -> _Catalogue:
+def _catalogue(path: Path, approval: CatalogueApproval | None = None) -> _Catalogue:
     """Read the approved catalogue and reject anything not fit to assert.
 
     A code that is not two uppercase letters is never emitted, and an ISO
-    code claimed by more than one destination is never resolved.
+    code claimed by more than one destination is never resolved. The catalogue
+    file is data, not authority: a code is only resolvable when a verified
+    approval ratifies the destination and the official document it came from.
     """
     with open_db(path) as db:
-        rows = db.execute("""SELECT destination_id,code,name_en,name_zh_hant,name_zh_hans
+        rows = db.execute("""SELECT destination_id,code,name_en,name_zh_hant,name_zh_hans,
+                              source_url,source_doc_version,source_checksum
                               FROM destinations WHERE code_scheme='HKP_DESTINATION_2'
                               AND profile='HKP_DESTINATION_2' AND approval_status='APPROVED' """).fetchall()
         iso_rows = db.execute("""SELECT code,destination_id FROM destinations
@@ -87,10 +91,14 @@ def _catalogue(path: Path) -> _Catalogue:
                                  AND approval_status='APPROVED' """).fetchall()
     destination_codes: dict[str, str] = {}
     names_by_destination: dict[str, tuple[str, ...]] = {}
-    for destination_id, code, name_en, name_tc, name_sc in rows:
+    for (destination_id, code, name_en, name_tc, name_sc,
+         source_url, source_doc_version, source_checksum) in rows:
         if not code or not CODE_RE.fullmatch(code):
             continue
-        destination_codes[destination_id] = code
+        if approval is not None and approval.allows(destination_id) and approval.ratifies_source(
+                source_url=source_url or "", source_doc_version=source_doc_version or "",
+                source_checksum=source_checksum or ""):
+            destination_codes[destination_id] = code
         names_by_destination[destination_id] = (name_en or "", name_tc or "", name_sc or "")
     iso_to_destination: dict[str, str] = {}
     ambiguous: set[str] = set()
@@ -240,7 +248,8 @@ def _resolve_hint(hint: str | None, catalogue: _Catalogue) -> str | None:
     return None
 
 
-def classify_record(record: AddressRecord, geo_db: Path, hkp_db: Path) -> ClassificationResult:
+def classify_record(record: AddressRecord, geo_db: Path, hkp_db: Path,
+                    approval: CatalogueApproval | None = None) -> ClassificationResult:
     """Classify one record against the reference pack and the HKP master."""
     def result(status, code=None, confidence=0.0, reason='', destination_id=None):
         return ClassificationResult(record.record_no, status, code, confidence, reason, destination_id)
@@ -252,7 +261,7 @@ def classify_record(record: AddressRecord, geo_db: Path, hkp_db: Path) -> Classi
     if has_unsupported_script(record.address_text):
         return result('UNKNOWN', reason='UNSUPPORTED_LANGUAGE')
 
-    catalogue = _catalogue(Path(hkp_db))
+    catalogue = _catalogue(Path(hkp_db), approval)
     # The first line of a multi-line address is the recipient, not a place.
     lines = [line.strip() for line in record.address_text.splitlines() if line.strip()]
     scope = '\n'.join(lines[1:]) if len(lines) > 1 else record.address_text
