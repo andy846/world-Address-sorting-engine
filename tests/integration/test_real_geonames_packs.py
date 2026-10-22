@@ -1,9 +1,8 @@
 """Verify the REAL worldwide GeoNames packs, not synthetic fixtures.
 
-These tests run against the databases produced by the successful GitHub
-Actions global build (run 39827512415, commit 929bbe6). They are skipped
-unless the packs are present locally, because the artefacts are far too large
-to commit to the repository.
+These tests run against the real databases. They are skipped unless the
+packs are present locally, because the artefacts are far too large to
+commit to the repository.
 
 Point WASE_REAL_PACK_DIR at the directory holding
 `compact/compact_global.sqlite` and `extended/extended_global.sqlite`, or
@@ -12,6 +11,11 @@ leave it unset to use the default `builds/real-2026-10-22` location.
 Point WASE_INSTALLED_PACK_DIR at the directory holding the installed
 `geonames-<profile>-<version>` pack directories, or leave it unset to use
 the default `packs` location.
+
+Point WASE_PACK_GENERATION at the pack generation to verify: `2026-10-22`
+is the published generation that carries the legacy, punctuation bearing
+keys; `2026-10-22-k2` is the rebuilt generation that stores punctuation
+free keys. The two hold different bytes and must both stay verifiable.
 
 `PRAGMA integrity_check` over the 1 GiB EXTENDED_GLOBAL pack takes about a
 minute, so that one check is opt-in: set WASE_SLOW_CHECKS=1 to run it.
@@ -35,15 +39,78 @@ from world_address_engine.matching.retrieve import retrieve_candidates
 from world_address_engine.sqlite_util import open_db
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-PACK_ROOT = Path(os.environ.get("WASE_REAL_PACK_DIR",
-                                REPO_ROOT / "builds" / "real-2026-10-22"))
+
+# Every published pack generation: where its databases live, where its
+# installed copies live and the exact fingerprints of its bytes.
+GENERATIONS = {
+    "2026-10-22": {
+        "root": REPO_ROOT / "builds" / "real-2026-10-22",
+        "built": {"COMPACT_GLOBAL": "compact/compact_global.sqlite",
+                  "EXTENDED_GLOBAL": "extended/extended_global.sqlite"},
+        "installed": {"COMPACT_GLOBAL": "geonames-compact-global-2026-10-22",
+                      "EXTENDED_GLOBAL": "geonames-extended-global-2026-10-22"},
+        "report": "report/geonames-built/build_report.json",
+        "zips": "packs",
+        "profiles": {
+            "COMPACT_GLOBAL": {
+                "bytes": 143949824,
+                "db_sha256": "e3b8b710e7acf05e0fe3618abecc5745d13d07a7826ae1f2a41767561faa2d2d",
+                "place_count": 715567,
+                "alias_count": 997281,
+                "compressed_bytes": 56535390,
+            },
+            "EXTENDED_GLOBAL": {
+                "bytes": 1098661888,
+                "db_sha256": "fb0e4774cc360ec5fe7b22d2b8176feea031abf02a6277dc42a3877c9da2074a",
+                "place_count": 5776152,
+                "alias_count": 8126852,
+                "compressed_bytes": 423280495,
+            },
+        },
+    },
+    # Rebuilt from the same pinned upstream archives with the punctuation
+    # free key format. Fewer aliases, because names that differ only by
+    # punctuation now share one key.
+    "2026-10-22-k2": {
+        "root": REPO_ROOT / "builds" / "real-2026-10-23",
+        "built": {"COMPACT_GLOBAL": "pack/compact_global.sqlite",
+                  "EXTENDED_GLOBAL": "pack/extended_global.sqlite"},
+        "installed": {"COMPACT_GLOBAL": "geonames-compact-global-2026-10-22-k2",
+                      "EXTENDED_GLOBAL": "geonames-extended-global-2026-10-22-k2"},
+        "report": "pack/build_report.json",
+        "zips": "pack",
+        "profiles": {
+            "COMPACT_GLOBAL": {
+                "bytes": 142577664,
+                "db_sha256": "f4ef044e94aa3d206f8fce1fa3e0d7ab5f03d6081d142fd7f9e8cf5837ab1b3f",
+                "place_count": 715567,
+                "alias_count": 993537,
+                "compressed_bytes": 56480487,
+            },
+            "EXTENDED_GLOBAL": {
+                "bytes": 1087344640,
+                "db_sha256": "70d617a532b8faedd7d9703c9b952945f101334907df5936725123d20be1f70f",
+                "place_count": 5776152,
+                "alias_count": 8048422,
+                "compressed_bytes": 420832046,
+            },
+        },
+    },
+}
+
+GENERATION = os.environ.get("WASE_PACK_GENERATION", "2026-10-22").strip()
+if GENERATION not in GENERATIONS:
+    raise SystemExit(f"unknown pack generation {GENERATION!r}; "
+                     f"choose one of {sorted(GENERATIONS)}")
+LAYOUT = GENERATIONS[GENERATION]
+
+PACK_ROOT = Path(os.environ.get("WASE_REAL_PACK_DIR", LAYOUT["root"]))
 
 # The installed, versioned packs carry their own manifest next to pack.db.
 INSTALLED_ROOT = Path(os.environ.get("WASE_INSTALLED_PACK_DIR",
                                      REPO_ROOT / "packs"))
 INSTALLED_PACKS = {
-    "COMPACT_GLOBAL": INSTALLED_ROOT / "geonames-compact-global-2026-10-22",
-    "EXTENDED_GLOBAL": INSTALLED_ROOT / "geonames-extended-global-2026-10-22",
+    name: INSTALLED_ROOT / LAYOUT["installed"][name] for name in LAYOUT["profiles"]
 }
 
 # `PRAGMA integrity_check` over the 1 GiB EXTENDED_GLOBAL pack takes about a
@@ -70,22 +137,8 @@ PUBLISHED_SOURCE_SHA256 = (
 KNOWN_UNINDEXED_PLACES = {"COMPACT_GLOBAL": 0, "EXTENDED_GLOBAL": 1}
 
 EXPECTED = {
-    "COMPACT_GLOBAL": {
-        "path": PACK_ROOT / "compact" / "compact_global.sqlite",
-        "bytes": 143949824,
-        "db_sha256": "e3b8b710e7acf05e0fe3618abecc5745d13d07a7826ae1f2a41767561faa2d2d",
-        "place_count": 715567,
-        "alias_count": 997281,
-        "compressed_bytes": 56535390,
-    },
-    "EXTENDED_GLOBAL": {
-        "path": PACK_ROOT / "extended" / "extended_global.sqlite",
-        "bytes": 1098661888,
-        "db_sha256": "fb0e4774cc360ec5fe7b22d2b8176feea031abf02a6277dc42a3877c9da2074a",
-        "place_count": 5776152,
-        "alias_count": 8126852,
-        "compressed_bytes": 423280495,
-    },
+    name: {"path": PACK_ROOT / LAYOUT["built"][name], **fingerprint}
+    for name, fingerprint in LAYOUT["profiles"].items()
 }
 
 ALLOWED_LANGUAGES = {"source-latin", "source-zh", "ascii", "en",
@@ -202,7 +255,7 @@ def test_real_packs_install_offline_and_stay_queryable(tmp_path):
     manifest = {
         "pack_id": "geonames-compact-global",
         "profile": "COMPACT_GLOBAL",
-        "pack_version": "2026-10-22",
+        "pack_version": GENERATION,
         "schema_version": 1,
         "created_at": "2026-10-22",
         "source_date": "2026-10-22",
@@ -214,7 +267,7 @@ def test_real_packs_install_offline_and_stay_queryable(tmp_path):
         "license": "CC BY 4.0",
     }
     installed = install_pack(expected["path"], manifest, tmp_path / "packs")
-    assert installed.name == "geonames-compact-global-2026-10-22"
+    assert installed.name == f"geonames-compact-global-{GENERATION}"
     assert verify_pack(installed / "pack.db", installed / "manifest.json")
     with open_db(installed / "pack.db") as conn:
         assert conn.execute("SELECT COUNT(*) FROM geo_places").fetchone()[0] == expected["place_count"]
@@ -226,7 +279,7 @@ def test_real_packs_install_offline_and_stay_queryable(tmp_path):
 
 
 def test_real_build_report_matches_the_published_fingerprints():
-    report_path = PACK_ROOT / "report" / "geonames-built" / "build_report.json"
+    report_path = PACK_ROOT / LAYOUT["report"]
     if not report_path.is_file():
         pytest.skip("build_report.json not present")
     report = json.loads(report_path.read_text(encoding="utf-8"))
@@ -246,7 +299,7 @@ def test_real_build_report_matches_the_published_fingerprints():
 
 def test_real_pack_zip_archives_hold_the_expected_database():
     for name, expected in EXPECTED.items():
-        archive = PACK_ROOT / "packs" / (name.lower() + ".sqlite.zip")
+        archive = PACK_ROOT / LAYOUT["zips"] / (name.lower() + ".sqlite.zip")
         if not archive.is_file():
             pytest.skip(f"compressed archive not present for {name}")
         assert archive.stat().st_size == expected["compressed_bytes"]
@@ -268,7 +321,7 @@ def test_installed_pack_matches_the_published_fingerprint(name):
     assert manifest["record_count"] == expected["place_count"]
     assert manifest["alias_count"] == expected["alias_count"]
     assert manifest["profile"] == name
-    assert manifest["pack_version"] == "2026-10-22"
+    assert manifest["pack_version"] == GENERATION
     assert manifest["schema_version"] == 1
 
 
@@ -381,8 +434,13 @@ def test_real_pack_resolves_real_world_cities(name):
 
 
 @pytest.mark.parametrize("name", sorted(EXPECTED))
-def test_real_pack_reaches_punctuation_bearing_legacy_keys(name):
-    """The 2026-10-22 packs store casefolded keys that keep their punctuation."""
+def test_real_pack_reaches_a_punctuation_bearing_name(name):
+    """A name with punctuation must resolve in both key generations.
+
+    The published generation stores the punctuation in the key; the
+    rebuilt generation folds it away and the reader folds it away with it.
+    Either way the place has to be found.
+    """
     expected = profile(name)
     candidates = retrieve_candidates(expected["path"], ("St. Louis",), limit=10)
     assert any(c.destination_id == "US" for c in candidates)
@@ -477,7 +535,7 @@ def test_pack_registry_rejects_a_flipped_byte_in_a_real_pack(tmp_path):
 
 def test_real_build_report_alias_language_counts_match_the_databases():
     """The published build report describes the databases that actually exist."""
-    report_path = PACK_ROOT / "report" / "geonames-built" / "build_report.json"
+    report_path = PACK_ROOT / LAYOUT["report"]
     if not report_path.is_file():
         pytest.skip("build_report.json not present")
     report = json.loads(report_path.read_text(encoding="utf-8"))
