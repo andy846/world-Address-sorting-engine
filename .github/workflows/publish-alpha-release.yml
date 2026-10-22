@@ -1,0 +1,80 @@
+name: Publish v0.1.0-alpha.0 developer pre-release
+
+on:
+  push:
+    branches:
+      - feat/hkp-trilingual-phase1
+    paths:
+      - .github/workflows/publish-alpha-release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: world-address-v0.1.0-alpha.0
+  cancel-in-progress: false
+
+jobs:
+  verify-package-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout the exact development snapshot
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Verify semantic package version
+        run: |
+          python - <<'PY'
+          import tomllib
+          with open("pyproject.toml", "rb") as handle:
+              data = tomllib.load(handle)
+          assert data["project"]["version"] == "0.1.0a0"
+          print("Verified package version 0.1.0a0")
+          PY
+
+      - name: Install development/test dependencies
+        run: python -m pip install -e ".[excel,test]"
+
+      - name: Run complete Python regression suite
+        run: python -m pytest -q
+
+      - name: Validate Python syntax
+        run: python -m compileall -q src tools
+
+      - name: Package source into Python wheel
+        run: python -m pip wheel --no-deps --wheel-dir dist .
+
+      - name: Verify packaged wheel is installable
+        run: |
+          python -m venv /tmp/world-address-release-smoke
+          /tmp/world-address-release-smoke/bin/python -m pip install dist/*.whl
+          /tmp/world-address-release-smoke/bin/world-address-engine --help
+          /tmp/world-address-release-smoke/bin/world-address-engine preview --help
+
+      - name: Record wheel fingerprint
+        run: |
+          cd dist
+          sha256sum ./*.whl > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Publish clearly labeled GitHub pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          TAG="v0.1.0-alpha.0"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::Release already exists; refusing to overwrite an immutable version"
+            exit 1
+          fi
+          gh release create "$TAG" dist/*.whl dist/SHA256SUMS.txt \
+            --target "$GITHUB_SHA" \
+            --title "v0.1.0-alpha.0 — Developer Preview (NOT FOR PRODUCTION)" \
+            --notes-file docs/releases/v0.1.0-alpha.0.md \
+            --prerelease
