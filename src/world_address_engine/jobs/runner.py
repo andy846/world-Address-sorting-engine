@@ -6,6 +6,7 @@ catalogue database can never approve itself.
 """
 from pathlib import Path
 import json
+import shutil
 
 from world_address_engine.io.delimited import iter_csv_records, iter_txt_records
 from world_address_engine.io.reports import write_reports
@@ -32,6 +33,10 @@ def _load_approval(manifest_path: Path | None, key_path: Path | None,
 # recorded in every export so a result can be traced to the rules that
 # produced it.
 RULES_VERSION = '2026-10-23.3'
+
+# How often the cancel flag is read while a batch is still filling. A cancel
+# must never be ignored because the job is smaller than one batch.
+CANCEL_CHECK_INTERVAL = 500
 
 
 def _code_validator(hkp_db: Path, approval: CatalogueApproval | None):
@@ -112,7 +117,8 @@ def _records(input_path: Path, options: dict):
 
 def _snapshot(input_path: Path, geo_db: Path, hkp_db: Path, options: dict, batch_size: int,
               testing: bool, approval: CatalogueApproval | None,
-              approval_manifest: Path | None, approval_key: Path | None) -> dict:
+              approval_manifest: Path | None, approval_key: Path | None,
+              keep_checkpoint: bool = False) -> dict:
     for p in (input_path, geo_db, hkp_db):
         if not p.is_file():
             raise FileNotFoundError(p)
@@ -140,6 +146,7 @@ def _snapshot(input_path: Path, geo_db: Path, hkp_db: Path, options: dict, batch
         'approval_manifest_sha256': approval.manifest_sha256 if approval else None,
         'approval_manifest_path': str(Path(approval_manifest).resolve()) if approval_manifest else None,
         'approval_key_path': str(Path(approval_key).resolve()) if approval_key else None,
+        'keep_checkpoint': bool(keep_checkpoint),
         'schema_version': 1,
     }
 
@@ -155,6 +162,14 @@ def _process(output_dir: Path, cfg: dict, *, max_batches: int | None = None,
     iterator = _records(source, cfg['input_options'])
     batch = []
     committed_new = 0
+    since_check = 0
+
+    def cancelled() -> bool:
+        """Read the cancel flag once and reset the periodic counter."""
+        nonlocal since_check
+        since_check = 0
+        return bool(cancel is not None and cancel())
+
     for record in iterator:
         if record.record_no <= last_committed:
             continue
@@ -162,6 +177,12 @@ def _process(output_dir: Path, cfg: dict, *, max_batches: int | None = None,
             raise ValueError('nonsequential source record')
         result = classify_record(record, geo, hkp, approval)
         batch.append((record, result))
+        since_check += 1
+        # A cancel must be honoured even when the job never fills a batch,
+        # so the flag is polled on a record interval as well as at every
+        # committed batch boundary.
+        if since_check >= CANCEL_CHECK_INTERVAL and cancelled():
+            return {'run_status': 'CANCELLED', 'committed_records': last_committed}
         if len(batch) >= cfg['batch_size']:
             commit_batch(state, batch)
             last_committed = batch[-1][0].record_no
@@ -169,13 +190,14 @@ def _process(output_dir: Path, cfg: dict, *, max_batches: int | None = None,
             committed_new += 1
             if progress is not None:
                 progress(last_committed)
-            if cancel is not None and cancel():
-                if batch:
-                    commit_batch(state, batch)
-                    last_committed = batch[-1][0].record_no
+            if cancelled():
                 return {'run_status': 'CANCELLED', 'committed_records': last_committed}
             if max_batches is not None and committed_new >= max_batches:
                 return {'run_status':'PAUSED', 'committed_records': last_committed}
+    # The trailing partial batch is never published after a cancel: the
+    # uncommitted records are simply left for the next resume.
+    if cancelled():
+        return {'run_status': 'CANCELLED', 'committed_records': last_committed}
     if batch:
         commit_batch(state, batch)
     paths, last_committed = committed_shards(state)
@@ -202,6 +224,10 @@ def _process(output_dir: Path, cfg: dict, *, max_batches: int | None = None,
                           else 'INDEPENDENTLY_AUDITED'),
         'approval_id': cfg.get('approval_id'),
         'approval_scope': cfg.get('approval_scope'),
+        # The review panel is bound to the approval that authorised *this*
+        # run, so the manifest must name it and pin its digest. The signing
+        # key itself is never written to a published artefact.
+        'approval_manifest_path': cfg.get('approval_manifest_path'),
         'approval_manifest_sha256': cfg.get('approval_manifest_sha256'),
         'input_sha256': cfg['input_sha256'],
         'geo_sha256': cfg['geo_sha256'],
@@ -215,6 +241,11 @@ def _process(output_dir: Path, cfg: dict, *, max_batches: int | None = None,
                            code_validator=_code_validator(Path(cfg['hkp_db']),
                                                          approval),
                            require_validated_codes=True)
+    if not cfg.get('keep_checkpoint'):
+        # The checkpoint shards hold the raw customer addresses in plain
+        # text. Once the exports are published the shards are redundant, so
+        # they are removed unless the operator explicitly asks to keep them.
+        shutil.rmtree(state, ignore_errors=True)
     return counts
 
 
@@ -225,6 +256,7 @@ def run_job(input_path: Path, output_dir: Path, geo_db: Path, hkp_db: Path,
             approval_manifest: Path | None = None,
             approval_key: Path | None = None,
             verify_shards: bool = False,
+            keep_checkpoint: bool = False,
             cancel=None, progress=None) -> dict:
     """Start a new offline job. Explicit testing bypass leaves TEST_ONLY manifest."""
     input_path, output_dir, geo_db, hkp_db = map(Path, (input_path, output_dir, geo_db, hkp_db))
@@ -236,7 +268,7 @@ def run_job(input_path: Path, output_dir: Path, geo_db: Path, hkp_db: Path,
     # against merely syntactically validated, unofficial fixture code tables.
     cfg = _snapshot(input_path, geo_db, hkp_db, options, batch_size,
                     allow_unverified_reference_data, approval,
-                    approval_manifest, approval_key)
+                    approval_manifest, approval_key, keep_checkpoint)
     cfg['verify_shards'] = bool(verify_shards)
     state = output_dir / '.job-state'
     if state.exists() or output_dir.joinpath('Run_Manifest.json').exists():
@@ -250,6 +282,7 @@ def run_job(input_path: Path, output_dir: Path, geo_db: Path, hkp_db: Path,
 
 def resume_job(run_dir: Path, *, max_batches: int | None = None,
                verify_shards: bool | None = None,
+               keep_checkpoint: bool | None = None,
                cancel=None, progress=None) -> dict:
     """Resume a paused/failed job ONLY if all source versions still match."""
     if max_batches is not None and max_batches < 1:
@@ -281,5 +314,7 @@ def resume_job(run_dir: Path, *, max_batches: int | None = None,
             raise ValueError('the supplied HKP approval cannot authorise production')
     if verify_shards is not None:
         cfg['verify_shards'] = bool(verify_shards)
+    if keep_checkpoint is not None:
+        cfg['keep_checkpoint'] = bool(keep_checkpoint)
     return _process(output, cfg, max_batches=max_batches, approval=approval,
                     cancel=cancel, progress=progress)

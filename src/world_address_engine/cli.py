@@ -81,6 +81,8 @@ def main(argv: list[str] | None=None) -> int:
     classify.add_argument('--test-only', action='store_true', help='Explicitly mark the output TEST ONLY; no production postal use')
     classify.add_argument('--verify-shards', action='store_true',
                           help='Re-derive every committed record and compare it with the checkpoint')
+    classify.add_argument('--keep-checkpoint', action='store_true',
+                        help='Keep the plaintext customer checkpoint shards after the run')
     resume = sub.add_parser('resume', help='Resume a paused run with source and data-pack integrity checks')
     resume.add_argument('--job-dir', type=Path, required=True)
     resume.add_argument('--max-batches', type=int)
@@ -88,6 +90,8 @@ def main(argv: list[str] | None=None) -> int:
     resume.add_argument('--approval-key', type=Path)
     resume.add_argument('--verify-shards', action='store_true',
                         help='Re-derive every committed record and compare it with the checkpoint')
+    resume.add_argument('--keep-checkpoint', action='store_true',
+                        help='Keep the plaintext customer checkpoint shards after the run')
     args=parser.parse_args(argv)
     try:
         if args.command == 'preview':
@@ -102,11 +106,13 @@ def main(argv: list[str] | None=None) -> int:
                            allow_unverified_reference_data=args.test_only,
                            approval_manifest=args.approval_manifest,
                            approval_key=args.approval_key,
-                           verify_shards=args.verify_shards)
+                           verify_shards=args.verify_shards,
+                           keep_checkpoint=args.keep_checkpoint)
         else:
             from world_address_engine.jobs.runner import resume_job
             report=resume_job(args.job_dir,max_batches=args.max_batches,
-                              verify_shards=args.verify_shards or None)
+                              verify_shards=args.verify_shards or None,
+                              keep_checkpoint=args.keep_checkpoint or None)
     except (ValueError,OSError,LookupError) as exc:
         print(f'Input preview failed: {exc}',file=sys.stderr)
         return 1
