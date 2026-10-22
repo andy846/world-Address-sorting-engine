@@ -164,3 +164,37 @@ def approved_codes(db_path: Path, approval: CatalogueApproval | None = None) -> 
             continue
         codes[destination_id] = code
     return codes
+
+
+def approved_destinations(db_path: Path, approval: CatalogueApproval | None = None
+                           ) -> dict[str, dict[str, str]]:
+    """Every approved destination, keyed by its two-letter code.
+
+    The manual quality-control panel asserts a *code*, so the lookup the
+    operator sees is code first. The value carries the identity the export
+    has to repeat, so a corrected row names the same destination the
+    catalogue holds.
+    """
+    with open_db(db_path) as conn:
+        rows = conn.execute(
+            """SELECT destination_id, code, name_en, name_zh_hant,
+                      source_url, source_doc_version, source_checksum
+               FROM destinations WHERE code_scheme='HKP_DESTINATION_2'
+               AND profile='HKP_DESTINATION_2' AND approval_status='APPROVED' """,
+        ).fetchall()
+    found: dict[str, dict[str, str]] = {}
+    for destination_id, code, name_en, name_tc, source_url, doc_version, checksum in rows:
+        if not re.fullmatch(r"[A-Z]{2}", code or ""):
+            continue
+        if approval is not None and not (
+                approval.allows(destination_id)
+                and approval.ratifies_source(source_url=source_url or "",
+                                             source_doc_version=doc_version or "",
+                                             source_checksum=checksum or "")):
+            continue
+        found[code] = {
+            'destination_id': destination_id,
+            'name_en': name_en or "",
+            'name_tc': name_tc or "",
+        }
+    return found

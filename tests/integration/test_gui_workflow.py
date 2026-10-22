@@ -6,6 +6,7 @@ The tests run headless with the offscreen Qt platform plugin.
 import csv
 import json
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -15,6 +16,7 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 
 pytest.importorskip('PySide6')
 
+from PySide6.QtGui import QCloseEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from world_address_engine.gui.review_store import ReviewError, ReviewStore  # noqa: E402
@@ -53,6 +55,18 @@ def _wait_for_job(window, app, timeout=120.0):
     return window.job_state
 
 
+def _wait_for_idle(window, app, timeout=60.0):
+    """Wait until no worker thread is running any more."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        app.processEvents()
+        if not window.busy:
+            app.processEvents()
+            return True
+        time.sleep(0.01)
+    return False
+
+
 def _prepare(window, data, master, geo_db):
     window.input_path.setText(str(data))
     window.geo_db.setText(str(geo_db))
@@ -67,7 +81,10 @@ def _prepare(window, data, master, geo_db):
 def test_review_decision_is_audited(tmp_path):
     store = ReviewStore(tmp_path / 'review.jsonl', operator='  Ada Lovelace ',
                         catalogue_version='fixture-2026-10',
-                        geo_pack_versions='geonames-test')
+                        geo_pack_versions='geonames-test',
+                        rules_version='2026-10-23.3',
+                        approval_id='fixture-approval',
+                        approval_manifest_sha256='a' * 64)
     decision = store.decide(7, record_id='000007', original_status='REVIEW_AMBIGUOUS',
                             original_reason='MULTIPLE_PLAUSIBLE_GEOGRAPHIC_DESTINATIONS',
                             new_code='JP', reason='operator confirmed the prefecture',
@@ -77,6 +94,9 @@ def test_review_decision_is_audited(tmp_path):
     assert decision.decided_at
     assert decision.catalogue_version == 'fixture-2026-10'
     assert decision.geo_pack_versions == 'geonames-test'
+    assert decision.rules_version == '2026-10-23.3'
+    assert decision.approval_id == 'fixture-approval'
+    assert decision.approval_manifest_sha256 == 'a' * 64
     again = ReviewStore(tmp_path / 'review.jsonl', operator='Ada Lovelace')
     assert again.decisions() == (decision,)
     log = store.write_csv(tmp_path / 'Review_Corrections.csv')
@@ -84,6 +104,8 @@ def test_review_decision_is_audited(tmp_path):
     assert rows[0]['Operator'] == 'Ada Lovelace'
     assert rows[0]['New_Code'] == 'JP'
     assert rows[0]['Reason'] == 'operator confirmed the prefecture'
+    assert rows[0]['Rules_Version'] == '2026-10-23.3'
+    assert rows[0]['Approval_ID'] == 'fixture-approval'
 
 
 def test_review_requires_an_operator_reason_and_an_approved_code(tmp_path):
@@ -95,6 +117,15 @@ def test_review_requires_an_operator_reason_and_an_approved_code(tmp_path):
         store.decide(1, new_code='JP', reason='  ')
     with pytest.raises(ReviewError):
         store.decide(1, new_code='ZZ', reason='because', approved_codes={'japan': 'JP'})
+
+
+def test_review_rejects_a_non_positive_record_number(tmp_path):
+    """A decision must name a real source record."""
+    store = ReviewStore(tmp_path / 'review.jsonl', operator='Ada')
+    with pytest.raises(ReviewError):
+        store.decide(0, reason='because')
+    with pytest.raises(ReviewError):
+        store.decide(-3, reason='because')
 
 
 def test_gui_import_map_classify_export(tmp_path, app):
@@ -151,6 +182,7 @@ def test_review_override_changes_one_record_only(tmp_path, app):
     window.review_table.selectRow(0)
     window.apply_review()
     window.export_reviews()
+    assert _wait_for_idle(window, app)
     rows = _read(window._output_dir / 'Classified_Addresses.csv')
     assert len(rows) == 3
     assert rows[0]['HKP_Destination_Code'] == 'US'
@@ -165,9 +197,8 @@ def test_review_override_changes_one_record_only(tmp_path, app):
     window.close()
 
 
-def test_gui_runs_the_job_off_the_main_thread(tmp_path, app):
+def test_the_worker_really_runs_off_the_gui_thread(tmp_path, app):
     """The classification runs on a worker thread, not on the GUI thread."""
-    from PySide6.QtCore import QThread
     from world_address_engine.gui.app import MainWindow
 
     data = tmp_path / 'sample.csv'
@@ -175,8 +206,85 @@ def test_gui_runs_the_job_off_the_main_thread(tmp_path, app):
     master = hkp(tmp_path)
     window = MainWindow()
     _prepare(window, data, master, geo(tmp_path))
+    gui_ident = threading.get_ident()
     window.start_job()
     assert window.worker_thread is not None
-    assert window.worker_thread is not QThread.currentThread()
+    assert window.worker_thread is not threading.current_thread()
     assert _wait_for_job(window, app) == 'done'
+    # The worker recorded the OS thread it really ran on. It must not be
+    # the thread that owns the window.
+    assert window.worker_thread_ident is not None
+    assert window.worker_thread_ident != gui_ident
+    assert window.counts.rowCount() == 1, 'the job really produced a result'
+    window.close()
+
+
+def test_closing_while_a_worker_runs_is_refused(tmp_path, app, monkeypatch):
+    """A running worker is never destroyed together with the window.
+
+    Destroying a running QThread aborts the interpreter (0xC0000409), so
+    the close is refused until the worker has really stopped.
+    """
+    from world_address_engine.gui import app as gui_app
+    from world_address_engine.gui.app import MainWindow
+
+    monkeypatch.setattr(gui_app, 'CLOSE_GRACE_SECONDS', 0.2)
+    window = MainWindow()
+
+    def slow(_emit):
+        time.sleep(1.0)
+        return {'run_status': 'COMPLETE'}
+
+    assert window._start_worker(slow) is True
+    assert window.busy
+    event = QCloseEvent()
+    window.closeEvent(event)
+    assert not event.isAccepted(), 'the close must be refused while a worker runs'
+    deadline = time.monotonic() + 10.0
+    while window.busy and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+    assert not window.busy
+    window.close()
+
+
+def test_the_review_panel_reports_how_many_rows_it_hides(tmp_path, app):
+    """A truncated review table must say how many rows are missing."""
+    from world_address_engine.gui import app as gui_app
+    from world_address_engine.gui.app import MainWindow
+
+    monkeypatch = getattr(gui_app, 'MAX_REVIEW_ROWS', 5000)
+    original = gui_app.MAX_REVIEW_ROWS
+    gui_app.MAX_REVIEW_ROWS = 1
+    try:
+        data = tmp_path / 'sample.csv'
+        _source(data, ['Springfield', 'Springfield', 'Springfield'])
+        master = hkp(tmp_path)
+        window = MainWindow()
+        _prepare(window, data, master, geo(tmp_path))
+        window.start_job()
+        assert _wait_for_job(window, app) == 'done'
+        assert window.review_table.rowCount() == 1
+        assert '3 records need review' in window.review_summary.text()
+        assert 'first 1' in window.review_summary.text()
+        window.close()
+    finally:
+        gui_app.MAX_REVIEW_ROWS = original
+
+
+def test_the_column_reader_honours_the_selected_encoding(tmp_path, app):
+    """The header is read with the encoding the operator selected."""
+    from world_address_engine.gui.app import MainWindow
+
+    data = tmp_path / 'big5.csv'
+    with data.open('w', encoding='big5', newline='') as stream:
+        writer = csv.writer(stream)
+        writer.writerow(['NAME_ADDRESS_LINE1', 'NAME_ADDRESS_LINE2'])
+        writer.writerow(['收件人', '台北市'])
+    window = MainWindow()
+    window.encoding.setCurrentText('big5')
+    window._load_columns(data)
+    labels = [window.address_columns.item(i).text()
+              for i in range(window.address_columns.count())]
+    assert labels == ['NAME_ADDRESS_LINE1', 'NAME_ADDRESS_LINE2']
     window.close()

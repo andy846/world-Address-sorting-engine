@@ -4,15 +4,26 @@ The GUI is a thin shell around the same deterministic engine the CLI uses.
 Widgets never touch SQL or the network: the job runs in a worker thread so
 the window stays responsive, and manual corrections are recorded in an
 audited ledger before the reports are recomputed.
+
+Two rules shape the review panel:
+
+* it is bound to the approval that authorised the *run*, never to whatever
+  the operator currently has typed into a text box, and
+* every long file operation runs off the GUI thread, so a multi-million row
+  export never freezes the window.
 """
 
 from __future__ import annotations
 
+import atexit
 import threading
 import sys
+import time
+from functools import partial
 from pathlib import Path
+from typing import Callable
 
-from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot
+from PySide6.QtCore import Qt, QThread, Signal, Slot
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -42,40 +53,109 @@ from world_address_engine.io.reports import apply_review_corrections
 from world_address_engine.jobs.runner import resume_job, run_job
 
 MAX_REVIEW_ROWS = 5000
+CLOSE_GRACE_SECONDS = 15.0
+
+# Every worker thread is kept alive here until it has really ended. A
+# QThread that is garbage collected while it still runs aborts the whole
+# interpreter (0xC0000409), which used to kill the test run whenever a
+# GUI test failed while a job was in flight.
+_LIVE_THREADS: set = set()
 
 
-class JobWorker(QObject):
-    """Runs a classification job off the GUI thread."""
+class WorkerThread(QThread):
+    """Runs one callable on a worker thread and reports the outcome.
 
-    progress = Signal(int)
-    message = Signal(str)
-    finished = Signal(dict)
+    A plain ``QThread`` subclass is deliberate: the thread owns no event
+    loop, so it ends as soon as the work is done. Nothing can then destroy
+    a still-running thread together with the window, which is what used to
+    abort the interpreter (0xC0000409) when a GUI test failed mid-job.
+    """
+
+    progressed = Signal(int)
+    succeeded = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, *, resume: bool, job_dir: Path | None = None, **kwargs):
+    def __init__(self, func: Callable[[Callable[[int], None]], object],
+                 cancel: threading.Event | None = None):
         super().__init__()
-        self._resume = resume
-        self._job_dir = job_dir
-        self._kwargs = kwargs
-        self._cancel = threading.Event()
+        self._func = func
+        self._cancel = cancel
+        self.thread_ident: int | None = None
 
     def request_cancel(self) -> None:
-        """Ask the running job to stop at the next committed batch."""
-        self._cancel.set()
+        """Ask the work to stop at its next checkpoint."""
+        if self._cancel is not None:
+            self._cancel.set()
 
-    @Slot()
     def run(self) -> None:
+        self.thread_ident = threading.get_ident()
         try:
-            if self._resume:
-                report = resume_job(self._job_dir, verify_shards=True,
-                                    cancel=self._cancel.is_set,
-                                    progress=self.progress.emit)
-            else:
-                report = run_job(cancel=self._cancel.is_set,
-                                 progress=self.progress.emit, **self._kwargs)
-            self.finished.emit(report)
+            self.succeeded.emit(self._func(self.progressed.emit))
         except Exception as exc:  # surfaced in the window, never swallowed
             self.failed.emit(f'{type(exc).__name__}: {exc}')
+
+
+def _thread_finished(thread: WorkerThread) -> None:
+    """Release a finished worker so its Qt object can be reclaimed."""
+    _LIVE_THREADS.discard(thread)
+
+
+@atexit.register
+def _shutdown_live_threads() -> None:
+    """Never leave a running worker behind when the interpreter exits.
+
+    A QThread that is destroyed while it still runs aborts the process
+    (0xC0000409), so the workers are asked to stop and joined here.
+    """
+    for thread in list(_LIVE_THREADS):
+        try:
+            thread.request_cancel()
+            thread.wait(15000)
+        except Exception:  # pragma: no cover - best effort at shutdown
+            pass
+
+
+def _read_published_export(output_dir: Path) -> dict:
+    """Read the published export back. Runs off the GUI thread.
+
+    A module level function on purpose: a worker closure that captured the
+    window would keep the whole window (and its thread) alive in a
+    reference cycle, and a thread collected while it still runs aborts the
+    interpreter.
+    """
+    import csv
+    import json
+
+    from world_address_engine.io.reports import RESULT_FIELDS
+
+    counts: dict[str, int] = {}
+    review_rows: list[dict] = []
+    review_total = 0
+    original_fields: list[str] = []
+    detail = output_dir / 'Classified_Addresses.csv'
+    if detail.is_file():
+        with detail.open(encoding='utf-8-sig', newline='') as stream:
+            reader = csv.DictReader(stream)
+            original_fields = [name for name in (reader.fieldnames or [])
+                               if name not in RESULT_FIELDS]
+            for row in reader:
+                code = row.get('HKP_Destination_Code', '')
+                if code:
+                    counts[code] = counts.get(code, 0) + 1
+                else:
+                    review_total += 1
+                    if len(review_rows) < MAX_REVIEW_ROWS:
+                        review_rows.append(row)
+    meta: dict = {}
+    data_class = ''
+    manifest = output_dir / 'Run_Manifest.json'
+    if manifest.is_file():
+        data = json.loads(manifest.read_text(encoding='utf-8'))
+        meta = data.get('run_metadata', {}) or {}
+        data_class = str(data.get('data_class') or '')
+    return {'counts': counts, 'review_rows': review_rows,
+            'review_total': review_total, 'meta': meta,
+            'data_class': data_class, 'original_fields': original_fields}
 
 
 class MainWindow(QMainWindow):
@@ -89,12 +169,18 @@ class MainWindow(QMainWindow):
         self.setWindowTitle('World Address Sorting Engine - offline')
         self.resize(1180, 820)
         self._thread = None
-        self._worker = None
+        self._cancel = threading.Event()
+        self._on_success = None
+        self._on_error = None
+        self._on_finished = None
+        self._last_result = None
+        self._last_error = ''
         self._review_store = None
         self._rows = []
         self._output_dir = None
         self._meta = {}
         self._approved = {}
+        self._approved_destinations = {}
         self._job_state = 'idle'
         self._job_error = ''
         self._last_report = None
@@ -198,6 +284,8 @@ class MainWindow(QMainWindow):
         self.counts.setHorizontalHeaderLabels(['HKP code', 'Count'])
         self.counts.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.counts)
+        self.review_summary = QLabel('No run loaded.')
+        layout.addWidget(self.review_summary)
         self.review_table = QTableWidget(0, 5)
         self.review_table.setHorizontalHeaderLabels(
             ['Record', 'Status', 'Code', 'Reason', 'Address'])
@@ -257,6 +345,7 @@ class MainWindow(QMainWindow):
         import csv
 
         self.address_columns.clear()
+        encoding = self.encoding.currentText() or 'utf-8-sig'
         try:
             if path.suffix.lower() == '.xlsx':
                 from openpyxl import load_workbook
@@ -268,7 +357,7 @@ class MainWindow(QMainWindow):
                 finally:
                     workbook.close()
             else:
-                with path.open('r', encoding='utf-8-sig', newline='') as stream:
+                with path.open('r', encoding=encoding, newline='') as stream:
                     header = next(csv.reader(stream), ())
         except Exception as exc:
             self.log.append(f'Could not read the header: {exc}')
@@ -283,6 +372,58 @@ class MainWindow(QMainWindow):
 
     def _selected_columns(self) -> tuple[str, ...]:
         return tuple(item.text() for item in self.address_columns.selectedItems())
+
+    # ------------------------------------------------------------------
+    # worker plumbing
+    # ------------------------------------------------------------------
+
+    def _start_worker(self, func, *, on_success=None, on_error=None,
+                      on_finished=None) -> bool:
+        """Run ``func`` off the GUI thread.
+
+        Only one worker runs at a time and the next stage is started from
+        the thread's ``finished`` signal, so a follow-up never races the
+        previous worker.
+        """
+        if self._thread is not None and self._thread.isRunning():
+            self._notify('Busy', 'The previous operation is still running.')
+            return False
+        thread = WorkerThread(func, cancel=self._cancel)
+        thread.progressed.connect(self._on_progress)
+        thread.succeeded.connect(self._on_worker_succeeded)
+        thread.failed.connect(self._on_worker_failed)
+        thread.finished.connect(self._on_worker_finished)
+        thread.finished.connect(partial(_thread_finished, thread))
+        self._thread = thread
+        self._on_success = on_success
+        self._on_error = on_error
+        self._on_finished = on_finished
+        _LIVE_THREADS.add(thread)
+        thread.start()
+        return True
+
+    @Slot(object)
+    def _on_worker_succeeded(self, result):
+        self._last_result = result
+        if self._on_success is not None:
+            self._on_success(result)
+
+    @Slot(str)
+    def _on_worker_failed(self, message):
+        self._last_error = message
+        if self._on_error is not None:
+            self._on_error(message)
+
+    @Slot()
+    def _on_worker_finished(self):
+        callback = self._on_finished
+        self._on_finished = None
+        if callback is not None:
+            callback()
+
+    # ------------------------------------------------------------------
+    # jobs
+    # ------------------------------------------------------------------
 
     def start_job(self) -> None:
         source_text = self.input_path.text().strip()
@@ -311,71 +452,85 @@ class MainWindow(QMainWindow):
         self._review_store = None
         manifest = self.approval_manifest.text().strip()
         key = self.approval_key.text().strip()
-        self._start(JobWorker(
-            resume=False,
-            input_path=source,
-            output_dir=output_dir,
-            geo_db=Path(self.geo_db.text()),
-            hkp_db=Path(self.hkp_db.text()),
-            input_options=options,
-            batch_size=10000,
-            allow_unverified_reference_data=self.test_only.isChecked(),
-            approval_manifest=Path(manifest) if manifest else None,
-            approval_key=Path(key) if key else None,
-        ))
-
-    def resume_job(self) -> None:
-        if self._output_dir is None:
-            self._notify('Nothing to resume', 'Run a job first.')
-            return
-        self._start(JobWorker(resume=True, job_dir=self._output_dir))
-
-    def _start(self, worker: JobWorker) -> None:
+        geo_db = Path(self.geo_db.text().strip())
+        hkp_db = Path(self.hkp_db.text().strip())
+        cancel = self._cancel
+        test_only = self.test_only.isChecked()
+        self._cancel.clear()
         self._job_state = 'running'
         self._job_error = ''
         self.run_button.setEnabled(False)
         self.resume_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
         self.progress.setRange(0, 0)
-        thread = QThread(self)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.progress.connect(self._on_progress)
-        worker.finished.connect(self._on_finished)
-        worker.failed.connect(self._on_failed)
-        worker.finished.connect(thread.quit)
-        worker.failed.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
-        self._thread = thread
-        self._worker = worker
-        thread.start()
+
+        def work(emit):
+            return run_job(cancel=cancel.is_set, progress=emit,
+                           input_path=source, output_dir=output_dir,
+                           geo_db=geo_db, hkp_db=hkp_db, input_options=options,
+                           batch_size=10000,
+                           allow_unverified_reference_data=test_only,
+                           approval_manifest=Path(manifest) if manifest else None,
+                           approval_key=Path(key) if key else None)
+
+        self._start_worker(work, on_success=self._on_job_done,
+                           on_error=self._on_job_failed,
+                           on_finished=self._after_job)
+
+    def resume_job(self) -> None:
+        if self._output_dir is None:
+            self._notify('Nothing to resume', 'Run a job first.')
+            return
+        output_dir = self._output_dir
+        cancel = self._cancel
+        self._cancel.clear()
+        self._job_state = 'running'
+        self._job_error = ''
+        self.run_button.setEnabled(False)
+        self.resume_button.setEnabled(False)
+        self.cancel_button.setEnabled(True)
+        self.progress.setRange(0, 0)
+
+        def work(emit):
+            return resume_job(output_dir, verify_shards=True,
+                              cancel=cancel.is_set, progress=emit)
+
+        self._start_worker(work, on_success=self._on_job_done,
+                           on_error=self._on_job_failed,
+                           on_finished=self._after_job)
 
     def cancel_job(self) -> None:
         """Stop at the next committed batch; the checkpoint stays resumable."""
-        if self._worker is not None:
-            self._worker.request_cancel()
-            self.cancel_button.setEnabled(False)
-            self.statusBar().showMessage('Cancelling after the current batch...')
+        self._cancel.set()
+        self.cancel_button.setEnabled(False)
+        self.statusBar().showMessage('Cancelling after the current batch...')
 
     @Slot(int)
     def _on_progress(self, records: int) -> None:
         self.statusBar().showMessage(f'{records} records classified')
 
-    @Slot(dict)
-    def _on_finished(self, report: dict) -> None:
+    def _on_job_done(self, report: dict) -> None:
         self.progress.setRange(0, 1)
         self.progress.setValue(1)
-        self._job_state = 'done'
+        cancelled = report.get('run_status') == 'CANCELLED'
+        # The run is only "done" once the export has been read back into
+        # the window, so the operator never sees an empty table next to a
+        # finished job.
+        self._job_state = 'cancelled' if cancelled else 'loading'
         self._last_report = report
         self.run_button.setEnabled(True)
         self.resume_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
         self.log.append(f'Finished: {report}')
-        self._load_results()
-        self.jobFinished.emit()
+        if cancelled:
+            self.statusBar().showMessage('Cancelled. The checkpoint can be resumed.')
 
-    @Slot(str)
-    def _on_failed(self, message: str) -> None:
+    def _after_job(self) -> None:
+        """Start the read-back once the worker thread has really ended."""
+        if self._job_state == 'loading':
+            self._load_results()
+
+    def _on_job_failed(self, message: str) -> None:
         self.progress.setRange(0, 1)
         self.progress.setValue(0)
         self._job_state = 'failed'
@@ -404,49 +559,67 @@ class MainWindow(QMainWindow):
 
     @property
     def job_state(self) -> str:
-        """``idle``, ``running``, ``done`` or ``failed``."""
+        """``idle``, ``running``, ``done``, ``cancelled`` or ``failed``."""
         return self._job_state
 
     @property
     def worker_thread(self):
-        """The thread the job runs on, or ``None`` before the first job."""
+        """The thread the last operation ran on, or ``None``."""
         return self._thread
 
     @property
+    def busy(self) -> bool:
+        """True while a worker thread is still running."""
+        thread = self._thread
+        if thread is None:
+            return False
+        try:
+            return thread.isRunning()
+        except RuntimeError:  # the Qt object was already reclaimed
+            return False
+
+    @property
+    def worker_thread_ident(self):
+        """The OS thread id the worker really ran on."""
+        return getattr(self._thread, 'thread_ident', None)
+
+    @property
     def approved_codes(self) -> dict[str, str]:
-        """destination_id -> code, for the codes the approval ratifies."""
+        """destination_id -> code, for the codes the run's approval ratifies."""
         return dict(self._approved)
 
-    def _load_results(self) -> None:
-        """Read the published export back for the operator to review."""
-        import csv
-        import json
+    # ------------------------------------------------------------------
+    # reading the published export
+    # ------------------------------------------------------------------
 
+    def _load_results(self) -> None:
+        """Read the published export back for the operator to review.
+
+        The file can hold millions of rows, so the read runs off the GUI
+        thread and only the finished summary is applied to the widgets.
+        """
         if self._output_dir is None:
             return
-        detail = self._output_dir / 'Classified_Addresses.csv'
-        if not detail.is_file():
-            return
-        from world_address_engine.io.reports import RESULT_FIELDS
+        output_dir = self._output_dir
 
-        counts: dict[str, int] = {}
-        review_rows: list[dict] = []
-        with detail.open(encoding='utf-8-sig', newline='') as stream:
-            reader = csv.DictReader(stream)
-            original_fields = [name for name in (reader.fieldnames or [])
-                               if name not in RESULT_FIELDS]
-            for row in reader:
-                code = row.get('HKP_Destination_Code', '')
-                if code:
-                    counts[code] = counts.get(code, 0) + 1
-                elif len(review_rows) < MAX_REVIEW_ROWS:
-                    review_rows.append(row)
+        def work(_emit):
+            return _read_published_export(output_dir)
+
+        self._start_worker(work, on_success=self._apply_results,
+                           on_error=self._on_background_error)
+
+    def _apply_results(self, payload: dict) -> None:
+        self._meta = payload.get('meta', {}) or {}
+        self._rows = payload.get('review_rows', [])
+        counts = payload.get('counts', {})
         self.counts.setRowCount(len(counts))
         for index, (code, count) in enumerate(sorted(counts.items())):
             self.counts.setItem(index, 0, QTableWidgetItem(code))
             self.counts.setItem(index, 1, QTableWidgetItem(str(count)))
-        self.review_table.setRowCount(len(review_rows))
-        for index, row in enumerate(review_rows):
+        original_fields = payload.get('original_fields', [])
+        rows = self._rows
+        self.review_table.setRowCount(len(rows))
+        for index, row in enumerate(rows):
             values = [row.get('Source_Record_No', ''),
                       row.get('Classification_Status', ''),
                       row.get('HKP_Destination_Code', ''),
@@ -456,55 +629,109 @@ class MainWindow(QMainWindow):
                                  if str(row.get(name, '')).strip())]
             for column, value in enumerate(values):
                 self.review_table.setItem(index, column, QTableWidgetItem(str(value)))
-        self._rows = review_rows
-        manifest = self._output_dir / 'Run_Manifest.json'
-        if manifest.is_file():
-            data = json.loads(manifest.read_text(encoding='utf-8'))
-            meta = data.get('run_metadata', {})
-            self._meta = meta
-            self.source_versions.setText(
-                f"Data class: {data.get('data_class')} | catalogue "
-                f"{meta.get('catalogue_version')} | packs {meta.get('geo_pack_versions')} "
-                f"| rules {meta.get('rules_version')}")
+        total = int(payload.get('review_total', len(rows)))
+        shown = len(rows)
+        if total > shown:
+            self.review_summary.setText(
+                f'{total} records need review; showing the first {shown}.')
+        else:
+            self.review_summary.setText(f'{total} records need review.')
+        self.source_versions.setText(
+            f"Data class: {payload.get('data_class')} | catalogue "
+            f"{self._meta.get('catalogue_version')} | packs "
+            f"{self._meta.get('geo_pack_versions')} | rules "
+            f"{self._meta.get('rules_version')}")
         self._load_approved_codes()
+        if self._job_state == 'loading':
+            self._job_state = 'done'
+            self.jobFinished.emit()
+
+    def _on_background_error(self, message: str) -> None:
+        self.log.append(f'Background operation failed: {message}')
+        self._notify('Operation failed', message, critical=True)
+
+    # ------------------------------------------------------------------
+    # the review panel
+    # ------------------------------------------------------------------
+
+    def _run_approval(self):
+        """The approval that authorised this run, or ``None`` with a reason.
+
+        The panel is bound to the *run*: the run manifest names the approval
+        manifest and pins its digest, the digest is verified, and the
+        operator's key is used only to check that exact manifest's
+        signature. What the operator has typed into the approval text box
+        never decides which codes may be asserted.
+        """
+        from world_address_engine.hkp.approval import file_sha256
+
+        meta = self._meta or {}
+        path = meta.get('approval_manifest_path')
+        digest = meta.get('approval_manifest_sha256')
+        if not path or not digest:
+            return None, ('This run recorded no signed approval, so no '
+                          'destination code may be asserted.')
+        manifest_path = Path(path)
+        if not manifest_path.is_file():
+            return None, 'The approval manifest recorded by the run is missing.'
+        if file_sha256(manifest_path) != digest:
+            return None, ('The approval manifest no longer matches the digest '
+                          'recorded by the run.')
+        key = self.approval_key.text().strip()
+        if not key:
+            return None, ('No approval key was supplied, so the run approval '
+                          'cannot be verified.')
+        db_text = self.hkp_db.text().strip()
+        if not db_text:
+            return None, 'The HKP catalogue recorded by the run is missing.'
+        db = Path(db_text)
+        expected = meta.get('hkp_sha256')
+        if expected and file_sha256(db) != expected:
+            return None, 'The HKP catalogue no longer matches the run.'
+        try:
+            from world_address_engine.hkp.approval import load_approval
+            return load_approval(manifest_path, Path(key), db), ''
+        except Exception as exc:
+            return None, f'The run approval could not be verified: {exc}'
 
     def _load_approved_codes(self) -> None:
-        """List only the destination codes the signed approval allows.
-
-        The operator may never assert a code the release process has not
-        ratified, so the panel is fed from the approval, not from the data
-        file's own `approval_status` column.
-        """
+        """List only the destination codes the run's approval ratifies."""
         self.review_code.clear()
-        path = self.hkp_db.text().strip()
-        if not path:
+        self._approved = {}
+        self._approved_destinations = {}
+        approval, problem = self._run_approval()
+        if approval is None:
+            self.log.append(problem)
             return
+        db = Path(self.hkp_db.text().strip())
         try:
-            from world_address_engine.hkp.catalogue import approved_codes
-            approval = self._load_approval(Path(path))
-            if approval is None:
-                self._approved = {}
-                self.log.append(
-                    'No signed approval was supplied, so no destination code '
-                    'may be asserted.')
-                return
-            codes = approved_codes(Path(path), approval)
+            from world_address_engine.hkp.catalogue import (
+                approved_codes, approved_destinations)
+            self._approved = approved_codes(db, approval)
+            self._approved_destinations = approved_destinations(db, approval)
         except Exception as exc:
             self._approved = {}
+            self._approved_destinations = {}
             self.log.append(f'No approved catalogue is available for review: {exc}')
             return
-        self._approved = codes
-        for code in sorted(set(codes.values())):
+        for code in sorted(set(self._approved.values())):
             self.review_code.addItem(code)
 
-    def _load_approval(self, db_path: Path):
-        """Verify the signed approval when the operator supplied one."""
-        manifest = self.approval_manifest.text().strip()
-        key = self.approval_key.text().strip()
-        if not manifest or not key:
-            return None
-        from world_address_engine.hkp.approval import load_approval
-        return load_approval(Path(manifest), Path(key), db_path)
+    def _store(self) -> ReviewStore:
+        """The ledger for this run, carrying the run's own provenance."""
+        if self._review_store is None:
+            ledger = (self._output_dir or Path.cwd()) / 'review_decisions.jsonl'
+            self._review_store = ReviewStore(
+                ledger, operator=self.operator.text(),
+                catalogue_version=self._meta.get('catalogue_version', ''),
+                geo_pack_versions=self._meta.get('geo_pack_versions', ''),
+                rules_version=self._meta.get('rules_version', ''),
+                approval_id=self._meta.get('approval_id', '') or '',
+                approval_manifest_sha256=(
+                    self._meta.get('approval_manifest_sha256', '') or ''))
+        else:
+            self._review_store.operator = self.operator.text()
+        return self._review_store
 
     def apply_review(self) -> None:
         """Record one audited correction for the selected review row."""
@@ -517,18 +744,15 @@ class MainWindow(QMainWindow):
             return
         row = self._rows[index]
         code = self.review_code.currentText() or None
-        if self._review_store is None:
-            ledger = (self._output_dir or Path.cwd()) / 'review_decisions.jsonl'
-            self._review_store = ReviewStore(ledger, operator=self.operator.text(),
-                                             catalogue_version=self._meta.get(
-                                                 'catalogue_version', ''),
-                                             geo_pack_versions=self._meta.get(
-                                                 'geo_pack_versions', ''))
-        else:
-            self._review_store.operator = self.operator.text()
         try:
-            decision = self._review_store.decide(
-                int(row.get('Source_Record_No', 0) or 0),
+            record_no = int(row.get('Source_Record_No', 0) or 0)
+        except (TypeError, ValueError):
+            self._notify('Correction rejected', 'The row has no record number.')
+            return
+        store = self._store()
+        try:
+            decision = store.decide(
+                record_no,
                 record_id=row.get('Record_ID', ''),
                 original_status=row.get('Classification_Status', ''),
                 original_code=row.get('HKP_Destination_Code') or None,
@@ -549,18 +773,43 @@ class MainWindow(QMainWindow):
         if self._review_store is None or self._output_dir is None:
             self._notify('Nothing to export', 'No corrections yet.')
             return
-        self._review_store.write_csv(self._output_dir / 'Review_Corrections.csv')
-        counts = apply_review_corrections(self._output_dir, self._review_store.decisions())
-        self.log.append(f'Reports refreshed: {counts}')
-        self._load_results()
+        output_dir = self._output_dir
+        try:
+            self._review_store.write_csv(output_dir / 'Review_Corrections.csv')
+        except OSError as exc:
+            self._notify('Review log not written', str(exc), critical=True)
+            return
+        decisions = self._review_store.decisions()
+        approved = dict(self._approved_destinations)
+
+        def work(_emit):
+            return apply_review_corrections(
+                output_dir, decisions,
+                approved_destination=approved.get,
+                require_validated_codes=True)
+
+        def done(counts):
+            self.log.append(f'Reports refreshed: {counts}')
+
+        self._start_worker(work, on_success=done,
+                           on_error=self._on_background_error,
+                           on_finished=self._load_results)
 
     def closeEvent(self, event) -> None:
         """Never leave a worker thread running behind a closed window."""
         thread = self._thread
         if thread is not None and thread.isRunning():
-            self._worker.request_cancel()
-            thread.quit()
-            thread.wait(5000)
+            self._cancel.set()
+            deadline = time.monotonic() + CLOSE_GRACE_SECONDS
+            while thread.isRunning() and time.monotonic() < deadline:
+                thread.wait(100)
+            if thread.isRunning():
+                event.ignore()
+                self._notify(
+                    'Still running',
+                    'The job is still running. Wait for it to finish or cancel '
+                    'it before closing the window.')
+                return
         super().closeEvent(event)
 
 

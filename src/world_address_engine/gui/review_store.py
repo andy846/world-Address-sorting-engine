@@ -21,7 +21,8 @@ REVIEW_FIELDS = (
     'Source_Record_No', 'Record_ID', 'Operator', 'Decided_At',
     'Original_Status', 'Original_Code', 'Original_Reason',
     'New_Status', 'New_Code', 'Reason',
-    'HKP_Catalogue_Version', 'Geo_Pack_Versions',
+    'HKP_Catalogue_Version', 'Geo_Pack_Versions', 'Rules_Version',
+    'Approval_ID', 'Approval_Manifest_SHA256',
 )
 
 
@@ -43,17 +44,24 @@ class ReviewDecision:
     reason: str
     catalogue_version: str
     geo_pack_versions: str
+    rules_version: str = ''
+    approval_id: str = ''
+    approval_manifest_sha256: str = ''
 
 
 class ReviewStore:
     """An append-only ledger of manual corrections for one job."""
 
     def __init__(self, path: Path, *, operator: str, catalogue_version: str = '',
-                 geo_pack_versions: str = ''):
+                 geo_pack_versions: str = '', rules_version: str = '',
+                 approval_id: str = '', approval_manifest_sha256: str = ''):
         self.path = Path(path)
         self.operator = operator
         self.catalogue_version = catalogue_version
         self.geo_pack_versions = geo_pack_versions
+        self.rules_version = rules_version
+        self.approval_id = approval_id
+        self.approval_manifest_sha256 = approval_manifest_sha256
         self._decisions: list[ReviewDecision] = []
         if self.path.is_file():
             self._load()
@@ -63,7 +71,13 @@ class ReviewStore:
             for line in stream:
                 line = line.strip()
                 if line:
-                    self._decisions.append(ReviewDecision(**json.loads(line)))
+                    payload = json.loads(line)
+                    # Ledgers written by an earlier build lack the newer
+                    # provenance columns; they stay readable.
+                    for field in ('rules_version', 'approval_id',
+                                  'approval_manifest_sha256'):
+                        payload.setdefault(field, '')
+                    self._decisions.append(ReviewDecision(**payload))
 
     def decisions(self) -> tuple[ReviewDecision, ...]:
         return tuple(self._decisions)
@@ -80,6 +94,8 @@ class ReviewStore:
                new_code: str | None = None, reason: str = '',
                approved_codes: dict[str, str] | None = None) -> ReviewDecision:
         """Record one correction. Only an approved code may be asserted."""
+        if record_no < 1:
+            raise ReviewError('a decision needs a positive source record number')
         if not self.operator.strip():
             raise ReviewError('an operator name is required')
         if not reason.strip():
@@ -102,6 +118,9 @@ class ReviewStore:
             reason=reason.strip(),
             catalogue_version=self.catalogue_version,
             geo_pack_versions=self.geo_pack_versions,
+            rules_version=self.rules_version,
+            approval_id=self.approval_id,
+            approval_manifest_sha256=self.approval_manifest_sha256,
         )
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open('a', encoding='utf-8', newline='\n') as stream:
@@ -131,5 +150,8 @@ class ReviewStore:
                     'Reason': decision.reason,
                     'HKP_Catalogue_Version': decision.catalogue_version,
                     'Geo_Pack_Versions': decision.geo_pack_versions,
+                    'Rules_Version': decision.rules_version,
+                    'Approval_ID': decision.approval_id,
+                    'Approval_Manifest_SHA256': decision.approval_manifest_sha256,
                 })
         return target
