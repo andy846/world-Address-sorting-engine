@@ -59,3 +59,19 @@ Outputs are Classified_Addresses.csv, Manual_Review.csv, Country_Summary.csv and
 **Privacy:** The .job-state folder stores plaintext recipient address rows as local JSONL checkpoints. Limit filesystem access, delete according to retention policy, and never upload this folder or actual customer CSV files to GitHub. SHA256 validation detects modified source files, data packs and checkpoint batches.
 
 **Status:** Not production ready — no fully reviewed HKP code master, full real GeoNames data packs, calibrated geographic scoring, Windows GUI or independent review. The new CLI workflow is for synthetic fixtures only.
+
+
+## Official worldwide GeoNames SQLite build
+
+The project now has a build-from-official-source path for Compact and Extended global packs, **without unpacking the large source ZIP files to disk**. Source inputs are the GeoNames allCountries.zip, alternateNamesV2.zip, and cities1000.zip downloads (CC BY 4.0).
+
+Run once on a host with network access, using Python 3.12+:
+
+```powershell
+python tools/download_geonames.py --source-dir "data/geonames-source"
+python tools/build_reference_pack.py --source-dir "data/geonames-source" --output-dir "builds/global" --both --compress
+```
+
+The output is two SQLite files and `build_report.json` reporting **actual byte sizes** and record counts, source hashes, integrity checks and archive sizes. Downloading is only a build-time operation; classification is offline.
+
+See [official build guide](docs/GEONAMES_DB_BUILD.md) and [GitHub Actions workflow](.github/workflows/build-geonames.yml). **No global SQLite capacity is claimed until a real full-data run succeeds.** Test fixtures are not the real global database.
