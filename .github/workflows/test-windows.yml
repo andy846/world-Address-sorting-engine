@@ -1,0 +1,39 @@
+name: Windows regression suite
+
+on:
+  push:
+    branches:
+      - feat/hkp-trilingual-phase1
+  pull_request:
+    branches:
+      - feat/hkp-trilingual-phase1
+  workflow_dispatch:
+
+jobs:
+  windows-regression:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout the development snapshot
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install development/test dependencies
+        run: python -m pip install -e ".[excel,test]"
+
+      # POSIX allows renaming or deleting a file that is still open, so a
+      # leaked SQLite handle is invisible on the Linux runners used by the
+      # release workflow. The packaged product targets Windows, so the suite
+      # has to run on Windows too.
+      - name: Run complete Python regression suite
+        run: python -m pytest -q
+
+      - name: Validate Python syntax
+        run: python -m compileall -q src tools
+
+      - name: Smoke test the installed console entry point
+        run: world-address-engine preview --help
