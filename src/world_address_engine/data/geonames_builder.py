@@ -7,6 +7,7 @@ and unsupported-language alternates are omitted from the search index.
 
 import hashlib
 import os
+import re
 import sqlite3
 import tempfile
 import unicodedata
@@ -20,6 +21,8 @@ PROFILES = frozenset({"COMPACT_GLOBAL", "EXTENDED_GLOBAL"})
 ALIAS_LANGS = frozenset({"en", "zh", "zh-CN", "zh-TW", "zh-Hans", "zh-Hant"})
 BATCH_SIZE = 10000
 
+_SEPARATORS = re.compile(r"[\W_]+", re.UNICODE)
+
 
 def _is_latin_word(text: str) -> bool:
     return bool(text.strip()) and all(
@@ -28,8 +31,21 @@ def _is_latin_word(text: str) -> bool:
     )
 
 
-def _search_key(text: str) -> str:
-    return " ".join(text.strip().casefold().split())
+def normalize_search_key(text: str) -> str:
+    """Canonical search key for a gazetteer name.
+
+    The key is case folded, Unicode normalised and stripped of punctuation,
+    so "St. John's", "St John's" and "St,John's" all become "st john s".
+    The reader (``matching.retrieve``) imports this very function, so the
+    producer and the consumer of a pack cannot drift apart.
+
+    Changing the key format changes the pack bytes. Any pack built with this
+    function must therefore be published under a new pack version and a new
+    fingerprint; the 2026-10-22 packs still carry the legacy, punctuation
+    bearing keys.
+    """
+    folded = unicodedata.normalize("NFKC", text).casefold()
+    return " ".join(_SEPARATORS.sub(" ", folded).split())
 
 
 def _insert_alias(conn: sqlite3.Connection, place_id: int, alias: str, language: str) -> None:
@@ -39,7 +55,7 @@ def _insert_alias(conn: sqlite3.Connection, place_id: int, alias: str, language:
     conn.execute(
         """INSERT OR IGNORE INTO geo_aliases(place_id, alias, search_key, language)
             SELECT place_id, ?, ?, ? FROM geo_places WHERE place_id=?""",
-        (alias, _search_key(alias), language, place_id),
+        (alias, normalize_search_key(alias), language, place_id),
     )
 
 

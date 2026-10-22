@@ -91,3 +91,35 @@ def test_source_name_is_labelled_when_no_explicit_tag_exists(tmp_path):
     # No explicit tag exists, so the derived label must still describe the row.
     assert query(db, "SELECT language FROM geo_aliases "
                      "WHERE place_id=1 AND search_key='springfield'") == [("source-latin",)]
+
+
+def test_punctuation_is_folded_out_of_the_search_key(tmp_path):
+    """The stored key must be the punctuation free form the reader produces."""
+    (tmp_path / "allCountries.txt").write_text(
+        _row(1, "St. John's", "St. John's", "P", "PPL", "CA", "01") + "\n", encoding="utf-8")
+    (tmp_path / "alternateNamesV2.txt").write_text("", encoding="utf-8")
+    db = tmp_path / "geo.db"
+    build_geonames_pack(tmp_path, db, "EXTENDED_GLOBAL")
+    assert query(db, "SELECT search_key FROM geo_aliases WHERE place_id=1") == [("st john s",)]
+
+
+def test_a_comma_in_a_name_becomes_a_single_space(tmp_path):
+    """'Pitcairn, Henderson, Ducie and Oeno Islands' must stay reachable."""
+    (tmp_path / "allCountries.txt").write_text(
+        _row(1, "Pitcairn, Henderson, Ducie and Oeno Islands",
+             "Pitcairn, Henderson, Ducie and Oeno Islands", "A", "PCLI", "PN") + "\n",
+        encoding="utf-8")
+    (tmp_path / "alternateNamesV2.txt").write_text("", encoding="utf-8")
+    db = tmp_path / "geo.db"
+    build_geonames_pack(tmp_path, db, "EXTENDED_GLOBAL")
+    assert query(db, "SELECT search_key FROM geo_aliases WHERE place_id=1") == [
+        ("pitcairn henderson ducie and oeno islands",)]
+
+
+def test_the_reader_uses_the_builder_search_key():
+    """Both sides must agree on one normalisation, not two similar ones."""
+    from world_address_engine.data import geonames_builder
+    from world_address_engine.matching import retrieve
+
+    assert retrieve.normalize_search_key is geonames_builder.normalize_search_key
+    assert geonames_builder.normalize_search_key("St. John's") == "st john s"

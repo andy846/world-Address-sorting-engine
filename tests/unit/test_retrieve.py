@@ -1,5 +1,9 @@
+import contextlib
+import time
+
 from pathlib import Path
 from world_address_engine.data.geonames_builder import build_geonames_pack
+from world_address_engine.matching import retrieve as retrieve_module
 from world_address_engine.matching.retrieve import retrieve_candidates
 from world_address_engine.matching.normalize import normalize_address
 
@@ -9,7 +13,7 @@ def _row(i, name, country, fclass='P', fcode='PPL', admin1='01', pop='1000'):
                        '', '', '', str(pop), '', '', 'UTC', '2024-01-01'])
 
 
-def geo(tmp_path):
+def geo(tmp_path, extra_rows=(), extra_aliases=()):
     source = tmp_path / 'source'
     source.mkdir(exist_ok=True)
     rows = [
@@ -33,10 +37,11 @@ def geo(tmp_path):
         _row(18, 'France', 'FR', 'A', 'PCLI', '00', 68720337),
         _row(19, 'Ontario', 'CA', 'A', 'ADM1', '08', 14100000),
         _row(20, 'United States', 'US', 'A', 'PCLI', '00', 341784857),
-    ]
+    ] + list(extra_rows)
     (source / 'allCountries.txt').write_text('\n'.join(rows) + '\n', encoding='utf8')
     (source / 'alternateNamesV2.txt').write_text(
-        '1\t11\ten\tDelhi\n2\t13\ten\tMacau\n3\t16\tzh\t中国\n', encoding='utf8')
+        '1\t11\ten\tDelhi\n2\t13\ten\tMacau\n3\t16\tzh\t中国\n'
+        + ''.join(extra_aliases), encoding='utf8')
     path = tmp_path / 'geo.db'
     build_geonames_pack(source, path, 'EXTENDED_GLOBAL')
     return path
@@ -123,3 +128,116 @@ def test_structured_hint_is_reported_even_without_geography(tmp_path):
 
 def test_limit_zero_returns_nothing(tmp_path):
     assert retrieve_candidates(geo(tmp_path), normalize_address('Tokyo'), None, limit=0) == []
+
+
+def _statement_counter(monkeypatch):
+    """Count the SELECT statements a retrieval issues."""
+    counter = {'n': 0}
+    original = retrieve_module.open_db
+
+    @contextlib.contextmanager
+    def counting(path):
+        with original(path) as conn:
+            def trace(statement):
+                if statement.lstrip().upper().startswith('SELECT'):
+                    counter['n'] += 1
+            conn.set_trace_callback(trace)
+            yield conn
+
+    monkeypatch.setattr(retrieve_module, 'open_db', counting)
+    return counter
+
+
+def test_long_country_name_is_reachable(tmp_path):
+    """A country name longer than four tokens must still resolve to itself."""
+    db = geo(tmp_path, extra_rows=[
+        _row(21, 'United States Minor Outlying Islands', 'UM', 'A', 'PCLI', '00', '300')])
+    found = _by_code(retrieve_candidates(
+        db, normalize_address('Wake, United States Minor Outlying Islands'), None))
+    assert 'UM' in found
+    assert found['UM'].country_entity is True
+    assert found['UM'].support >= 0.6
+
+
+def test_punctuated_place_names_are_reachable(tmp_path):
+    """'St John's' must reach the place that is stored as "St. John's"."""
+    db = geo(tmp_path, extra_rows=[_row(22, "St. John's", 'CA', 'P', 'PPL', '01', '100000')])
+    found = _by_code(retrieve_candidates(
+        db, normalize_address("St John's, Newfoundland"), None))
+    assert 'CA' in found
+    assert found['CA'].support > 0.1
+
+
+def test_chinese_evidence_survives_a_long_address(tmp_path):
+    """A long address must not truncate away every Chinese name."""
+    db = geo(tmp_path,
+             extra_rows=[_row(23, 'Hong Kong', 'HK', 'A', 'PCLS', '00', '7500000')],
+             extra_aliases=['4\t23\tzh\t香港\n'])
+    long_prefix = ' '.join('word%03d' % index for index in range(120))
+    found = _by_code(retrieve_candidates(
+        db, normalize_address(long_prefix + ' 香港'), None))
+    assert 'HK' in found
+    assert found['HK'].country_entity is True
+
+
+def test_a_very_common_term_keeps_every_country_it_mentions(tmp_path):
+    """A term matching hundreds of rows must not lose whole countries."""
+    rows = [_row(100 + i, 'Buena Vista', 'US', 'P', 'PPL', '01', str(500000 - i))
+            for i in range(450)]
+    rows += [_row(600 + i, 'Buena Vista', code, 'P', 'PPL', '01', '10')
+             for i, code in enumerate(('AW', 'BR', 'CL', 'CO', 'EC', 'ES'))]
+    db = geo(tmp_path, extra_rows=rows)
+    found = _by_code(retrieve_candidates(db, normalize_address('Buena Vista, Brazil'), None))
+    assert {'US', 'AW', 'BR', 'CL', 'CO', 'EC', 'ES'} <= set(found)
+
+
+def test_a_long_chinese_name_inside_a_longer_run_is_found(tmp_path):
+    """A seven character Chinese name needs a wide enough n-gram window."""
+    db = geo(tmp_path,
+             extra_rows=[_row(24, 'Guangxi', 'CN', 'A', 'ADM1', '80', '25000000')],
+             extra_aliases=['5\t24\tzh\t广西壮族自治区\n'])
+    found = _by_code(retrieve_candidates(
+        db, normalize_address('广西壮族自治区南宁市'), None))
+    assert 'CN' in found
+    assert found['CN'].support >= 0.26
+
+
+def test_search_keys_are_queried_in_batches(tmp_path, monkeypatch):
+    """One statement per key is what made retrieval twice as slow as needed."""
+    db = geo(tmp_path)
+    counter = _statement_counter(monkeypatch)
+    found = retrieve_candidates(
+        db,
+        normalize_address('Tokyo Mumbai London Springfield Shinjuku New Delhi India Japan'),
+        None)
+    assert counter['n'] <= 2
+    assert {'JP', 'IN', 'GB', 'US'} <= {c.destination_id for c in found}
+
+
+def test_hint_candidate_never_exceeds_the_limit(tmp_path):
+    db = geo(tmp_path)
+    found = retrieve_candidates(
+        db, normalize_address('Tokyo Mumbai London Springfield Shinjuku'), 'SG', limit=2)
+    assert len(found) == 2
+    assert any(c.destination_id == 'SG' for c in found)
+    assert any('STRUCTURED_COUNTRY_HINT' in c.evidence for c in found)
+
+
+def test_a_very_long_token_is_bounded(tmp_path):
+    """A megabyte long token must not stall the retrieval."""
+    db = geo(tmp_path)
+    started = time.perf_counter()
+    found = retrieve_candidates(db, ('x' * 1_000_000,), None)
+    elapsed = time.perf_counter() - started
+    assert elapsed < 5.0
+    assert all(c.support == 0.0 for c in found)
+    terms = retrieve_module._collect_terms(('x' * 1_000_000,))
+    assert max((len(key) for keys in terms.values() for key in keys), default=0) \
+        <= retrieve_module.MAX_FORM_CHARS + 1
+
+
+def test_input_text_is_length_bounded():
+    bounded = getattr(retrieve_module, '_bounded_segments', None)
+    assert bounded is not None, 'the reader must bound the input length'
+    segments = bounded('a' * 500_000)
+    assert sum(len(segment) for segment in segments) <= retrieve_module.MAX_FORM_CHARS
