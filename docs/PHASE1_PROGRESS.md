@@ -2,17 +2,42 @@
 
 **Status: IN PROGRESS — NOT PRODUCTION READY**
 
-The implementation plan contains 13 tasks. Tasks 1–4 were implemented with local test-first cycles and synchronized to GitHub branch `feat/hkp-trilingual-phase1`.
+Development branch: `feat/hkp-trilingual-phase1` (Draft PR #1, not merged). Target: verified Hongkong Post two-letter destination code and English/Traditional/Simplified Chinese address classification without internet access.
 
-- Task 1: immutable data contracts and status invariants. 5 tests.
-- Task 2: HKP two-letter postal destination code resolver with separate ISO and EC-Ship schemes; manifest checksum checks, duplicate/conflict rejection, source host verification. 7 tests.
-- Task 3: GeoNames compact/extended SQLite builder using local data, preserving English/Chinese aliases and Latin spellings, removing unsupported aliases and topographic features. 4 tests.
-- Task 4: SQLite pack manifest hash verification and atomic installation without overwriting earlier packs. 3 tests.
+## Completed foundations and local prototype modules
 
-Local verification: `python -m pytest -q` on Linux, Python 3.13.5 — 19 passed. The remote branch files were fetched again for presence checks; the tests have **not** run in GitHub Actions or on Windows. There is no independent Subagent review in this environment; progress is the inline fallback, not full Subagent-driven verification.
+- Task 1: immutable record/candidate/result contracts and status invariants.
+- Task 2: provenance/format/hash-checked HKP code catalogue; ISO and EC-Ship are separate schemes. **Still missing a complete manually verified current official master.**
+- Task 3: two locally built GeoNames profile options, COMPACT_GLOBAL and EXTENDED_GLOBAL, indexing English, selected Chinese and Romanized Latin names.
+- Task 4: offline pack hashing and immutable activation.
+- Task 5: prototype English/Chinese normalization and unsupported-script checks; curated Chinese name variants (not yet full OpenCC-scale coverage).
+- Task 6: bounded SQLite candidate retrieval by place names; full administrative-hierarchy validation and hard real-world cases still need further work.
+- Task 7: conservative prototype classifier: source country evidence, weak-geo ambiguity and HKP output guard. Heuristic score is NOT a calibrated accuracy guarantee.
+- Task 8: stream CSV/TXT, preserve Control no leading zeros and numbered blank-header columns, detect corrupt input rows.
+- Task 9: read-only XLSX adapter, selected sheet and explicit handling for missing cached formula values.
+- Task 10: stream detailed result / HKP summary / manual-review outputs, export manifest and count reconciliation; full production input-to-export runner is still outstanding.
+- Task 11 (partial): privacy-safe CLI `preview` subcommand only. The production job runner, durable checkpoint/resume and end-to-end classification CLI remain NOT implemented.
+- Tasks 12-13: Windows PySide6 GUI, independent final code review, packaging, full offline/volume/DB-size benchmarking NOT complete.
 
-**Critical safety caveats:** No complete HKP official code master has been built or row-by-row reviewed. Sample HKP test data does not qualify as postal reference data. No actual world GeoNames file set has been downloaded or processed yet; size/speed savings are unmeasured. The three supported input languages have not yet been implemented in an end-to-end classifier. GUI, CSV/XLSX/TXT import, status scoring, report export, restart/resume, and offline release packaging are outstanding (Tasks 5–13).
+## Real uploaded file format validation (sensitive source not committed)
 
-The existing HKP loader checks input-format and supplied manifest provenance, but **does not independently verify the official document contains the code**; that requires a separate human-reviewed data acquisition step. `APPROVED` in a test fixture has no production authority.
+User-provided `AAAAA.csv`, UTF-8 BOM, 1,203,422 bytes, 9,604 logical records, twelve columns:
+five `NAME_ADDRESS_LINE1` through `LINE5`, `Control no`, and six identically blank header cells. All 9,604 rows read without decoding errors. One record has a nonempty extra unnamed cell. Control numbers are unique in the supplied data. Addresses have 2/3/4/5 nonempty lines with respective counts 67 / 2,121 / 3,536 / 3,880.
 
-Do not use these modules to classify real mailing production yet.
+The sample was used ONLY for structural/integrity preview; no country codes are claimed for the real addresses, and source addresses/control values are not stored in the repository.
+
+## Test and release status
+
+Local Linux/Python 3.13 test-first verification: `python -m pytest -q` — **58 passed**; `python -m compileall -q src` — completed without compilation errors. Remote GitHub source/test blobs newly added were compared against local Git hash-object and matched.
+
+No network is required for preview; classification source/version integrity is separate and must be verified before launch. **No independent Subagent review, CI verification, Windows runtime test, official master audit, real GeoNames import, or actual delivery accuracy benchmark has happened.**
+
+## Release blockers
+
+1. Verify full official current HKP two-letter code master with reviewed source mapping and service context, including territories differing from ISO.
+2. Build genuine GeoNames COMPACT/EXTENDED datasets and measure file sizes, matching quality, Chinese name coverage and rural-place recall.
+3. Fix all high-risk matching/alias ambiguities found from labeled real samples.
+4. Finish full batch runner, resume/checkpoint, QC/manual review interface, GUI, and end-to-end exports.
+5. Run independently reviewed full regressions, 100k/1m/5m records tests, and packaged fully-offline Windows validation.
+
+**Do not merge or use this branch for live mailing production yet.**
