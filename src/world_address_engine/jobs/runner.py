@@ -145,7 +145,8 @@ def _snapshot(input_path: Path, geo_db: Path, hkp_db: Path, options: dict, batch
 
 
 def _process(output_dir: Path, cfg: dict, *, max_batches: int | None = None,
-             approval: CatalogueApproval | None = None) -> dict:
+             approval: CatalogueApproval | None = None,
+             cancel=None, progress=None) -> dict:
     state = output_dir / '.job-state'
     paths, last_committed = committed_shards(state)
     source = Path(cfg['input_path'])
@@ -166,6 +167,13 @@ def _process(output_dir: Path, cfg: dict, *, max_batches: int | None = None,
             last_committed = batch[-1][0].record_no
             batch.clear()
             committed_new += 1
+            if progress is not None:
+                progress(last_committed)
+            if cancel is not None and cancel():
+                if batch:
+                    commit_batch(state, batch)
+                    last_committed = batch[-1][0].record_no
+                return {'run_status': 'CANCELLED', 'committed_records': last_committed}
             if max_batches is not None and committed_new >= max_batches:
                 return {'run_status':'PAUSED', 'committed_records': last_committed}
     if batch:
@@ -216,7 +224,8 @@ def run_job(input_path: Path, output_dir: Path, geo_db: Path, hkp_db: Path,
             allow_unverified_reference_data: bool = False,
             approval_manifest: Path | None = None,
             approval_key: Path | None = None,
-            verify_shards: bool = False) -> dict:
+            verify_shards: bool = False,
+            cancel=None, progress=None) -> dict:
     """Start a new offline job. Explicit testing bypass leaves TEST_ONLY manifest."""
     input_path, output_dir, geo_db, hkp_db = map(Path, (input_path, output_dir, geo_db, hkp_db))
     if max_batches is not None and max_batches < 1:
@@ -235,11 +244,13 @@ def run_job(input_path: Path, output_dir: Path, geo_db: Path, hkp_db: Path,
     output_dir.mkdir(parents=True, exist_ok=True)
     state.mkdir()
     atomic_json(state / 'config.json', cfg)
-    return _process(output_dir, cfg, max_batches=max_batches, approval=approval)
+    return _process(output_dir, cfg, max_batches=max_batches, approval=approval,
+                    cancel=cancel, progress=progress)
 
 
 def resume_job(run_dir: Path, *, max_batches: int | None = None,
-               verify_shards: bool | None = None) -> dict:
+               verify_shards: bool | None = None,
+               cancel=None, progress=None) -> dict:
     """Resume a paused/failed job ONLY if all source versions still match."""
     if max_batches is not None and max_batches < 1:
         raise ValueError('max_batches must be positive')
@@ -270,4 +281,5 @@ def resume_job(run_dir: Path, *, max_batches: int | None = None,
             raise ValueError('the supplied HKP approval cannot authorise production')
     if verify_shards is not None:
         cfg['verify_shards'] = bool(verify_shards)
-    return _process(output, cfg, max_batches=max_batches, approval=approval)
+    return _process(output, cfg, max_batches=max_batches, approval=approval,
+                    cancel=cancel, progress=progress)
