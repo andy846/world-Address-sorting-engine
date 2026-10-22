@@ -1,7 +1,7 @@
-import sqlite3
 from pathlib import Path
 
 from world_address_engine.data.geonames_builder import build_geonames_pack
+from world_address_engine.sqlite_util import open_db
 
 
 def _row(place_id: int, name: str, ascii_name: str, cls: str, code: str, country: str, admin1: str = "") -> str:
@@ -30,7 +30,7 @@ def make_sources(root: Path):
 
 
 def query(db: Path, sql: str):
-    with sqlite3.connect(db) as con:
+    with open_db(db) as con:
         return con.execute(sql).fetchall()
 
 

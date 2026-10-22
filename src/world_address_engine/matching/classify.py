@@ -3,15 +3,15 @@
 Only reviewed HKP_DESTINATION_2 codes may be output, never ISO fallbacks.
 The confidence value is a heuristic, NOT calibrated postal accuracy.
 """
-import sqlite3
 from pathlib import Path
 from world_address_engine.models import AddressRecord, ClassificationResult
 from world_address_engine.matching.normalize import contains_name, normalize_address, has_unsupported_script
 from world_address_engine.matching.retrieve import retrieve_candidates
+from world_address_engine.sqlite_util import open_db
 
 
 def _postal_catalogue(path: Path):
-    with sqlite3.connect(path) as db:
+    with open_db(path) as db:
         rows=db.execute('''SELECT destination_id,code,name_en,name_zh_hant,name_zh_hans
                            FROM destinations WHERE code_scheme='HKP_DESTINATION_2'
                            AND profile='HKP_DESTINATION_2' AND approval_status='APPROVED' ''').fetchall()

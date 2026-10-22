@@ -5,12 +5,12 @@ integrated. It refuses a production run in the current catalogue schema.
 """
 from pathlib import Path
 import json
-import sqlite3
 
 from world_address_engine.io.delimited import iter_csv_records, iter_txt_records
 from world_address_engine.io.reports import write_reports
 from world_address_engine.io.xlsx import iter_xlsx_records
 from world_address_engine.matching.classify import classify_record
+from world_address_engine.sqlite_util import open_db
 from world_address_engine.jobs.checkpoint import (
     atomic_json, commit_batch, committed_shards, file_sha256, iter_saved_pairs,
 )
@@ -18,7 +18,7 @@ from world_address_engine.jobs.checkpoint import (
 
 def _hkp_audited(db_path: Path) -> bool:
     """Fail closed for older and fixture catalogues lacking audit approval."""
-    with sqlite3.connect(db_path) as con:
+    with open_db(db_path) as con:
         cols = {row[1] for row in con.execute('PRAGMA table_info(metadata)')}
         if 'production_approved' not in cols:
             return False

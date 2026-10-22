@@ -1,8 +1,8 @@
 """Verify official GeoNames ZIP layout is parsed directly without unpacking."""
-import sqlite3
 import zipfile
 from pathlib import Path
 from world_address_engine.data.geonames_builder import build_geonames_pack
+from world_address_engine.sqlite_util import open_db
 
 
 def row(i, name, latin, cls, country):
@@ -39,7 +39,7 @@ def test_zipped_compact_and_extended_are_measured_and_valid(tmp_path):
     assert c["sqlite_bytes"]==compact.stat().st_size
     assert e["sqlite_bytes"]==extended.stat().st_size
     assert e["alias_count"]>=c["alias_count"]
-    with sqlite3.connect(compact) as db:
+    with open_db(compact) as db:
         assert db.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
         aliases={x[0] for x in db.execute("SELECT alias FROM geo_aliases")}
     assert "東京" in aliases and "东京" in aliases and "とうきょう" not in aliases

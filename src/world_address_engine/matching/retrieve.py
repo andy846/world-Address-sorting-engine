@@ -4,10 +4,10 @@ Retrieval is *evidence*, not postal delivery verification. A city name
 alone must not become an asserted country in the classification layer.
 """
 import re
-import sqlite3
 from collections import defaultdict
 from pathlib import Path
 from world_address_engine.models import DestinationCandidate
+from world_address_engine.sqlite_util import open_db
 
 
 _LATIN = re.compile(r'[a-z0-9]+')
@@ -38,7 +38,7 @@ def retrieve_candidates(geo_db: Path, address_forms: tuple[str,...], country_hin
     terms = _search_terms(address_forms)
     ids: dict[str, set[int]] = defaultdict(set)
     descriptions: dict[str, list[str]] = defaultdict(list)
-    with sqlite3.connect(geo_db) as db:
+    with open_db(geo_db) as db:
         for i in range(0,len(terms),400):
             group = terms[i:i+400]
             marks=','.join('?' for _ in group)

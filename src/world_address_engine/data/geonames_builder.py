@@ -13,6 +13,8 @@ import zipfile
 from io import TextIOWrapper
 from pathlib import Path
 
+from world_address_engine.sqlite_util import open_db
+
 PROFILES = frozenset({"COMPACT_GLOBAL", "EXTENDED_GLOBAL"})
 ALIAS_LANGS = frozenset({"en", "zh", "zh-CN", "zh-TW", "zh-Hans", "zh-Hant"})
 BATCH_SIZE = 10000
@@ -87,7 +89,7 @@ def build_geonames_pack(source_dir: Path, target_db: Path, profile: str) -> dict
     os.close(fd)
     temporary_db = Path(name)
     try:
-        with sqlite3.connect(temporary_db) as conn:
+        with open_db(temporary_db) as conn:
             conn.execute("PRAGMA journal_mode=DELETE")
             conn.execute("""CREATE TABLE geo_places (
                 place_id INTEGER PRIMARY KEY, name TEXT NOT NULL,

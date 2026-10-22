@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
-import sqlite3
 import sys
 import zipfile
 
@@ -20,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT / "src") not in sys.path:
     sys.path.insert(0, str(ROOT / "src"))
 from world_address_engine.data.geonames_builder import build_geonames_pack
+from world_address_engine.sqlite_util import open_db
 
 SOURCE = "https://download.geonames.org/export/dump/"
 
@@ -56,7 +56,7 @@ def build(source_dir: Path, output_dir: Path, profiles: list[str], compress: boo
         actual = db.stat().st_size
         if metrics["sqlite_bytes"] != actual:
             raise ValueError("Measured SQLite byte size differs from builder")
-        with sqlite3.connect(db) as con:
+        with open_db(db) as con:
             if con.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise ValueError("SQLite integrity verification failed")
             languages = dict(con.execute("SELECT language,COUNT(*) FROM geo_aliases GROUP BY language"))

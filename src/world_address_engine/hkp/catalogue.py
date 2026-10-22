@@ -14,6 +14,8 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from world_address_engine.sqlite_util import open_db
+
 SCHEME = "HKP_DESTINATION_2"
 REQUIRED_FIELDS = frozenset({
     "destination_id", "code_scheme", "code", "name_en", "name_zh_hant", "name_zh_hans",
@@ -64,7 +66,7 @@ def import_hkp_catalogue(source_csv: Path, manifest_json: Path, db_path: Path) -
     os.close(fd)
     temporary_db = Path(tempfile_name)
     try:
-        with sqlite3.connect(temporary_db) as conn:
+        with open_db(temporary_db) as conn:
             conn.execute("CREATE TABLE metadata (catalogue_version TEXT NOT NULL, csv_sha256 TEXT NOT NULL)")
             conn.execute("INSERT INTO metadata VALUES (?, ?)", (meta["catalogue_version"], digest))
             conn.execute("""CREATE TABLE destinations (
@@ -107,7 +109,7 @@ def lookup_hkp_code(db_path: Path, destination_id: str, profile: str = SCHEME) -
     """Never substitute a different code scheme, even if destination exists."""
     if profile != SCHEME:
         return None
-    with sqlite3.connect(db_path) as conn:
+    with open_db(db_path) as conn:
         row = conn.execute(
             """SELECT code FROM destinations WHERE destination_id=?
                AND code_scheme=? AND profile=? AND approval_status='APPROVED'""",
