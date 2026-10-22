@@ -3,7 +3,7 @@ from pathlib import Path
 from world_address_engine.models import AddressRecord
 from world_address_engine.matching.classify import classify_record
 from tests.hkp_master_fixture import build_master
-from tests.unit.test_retrieve import geo
+from tests.unit.test_retrieve import geo, _row
 
 HKP_SOURCE = 'https://ec-ship.hongkongpost.hk/platform/data/imailZoneChart_v2.pdf'
 
@@ -190,4 +190,75 @@ def test_a_missing_catalogue_mapping_keeps_the_resolved_country(tmp_path):
     assert result.status == 'REVIEW_CODE_MAPPING'
     assert result.hkp_code is None
     assert 'GEOGRAPHY:FR' in result.evidence
+
+
+# A country name that is a whole word inside a longer country name is not a
+# second country: "Guinea" inside "Papua New Guinea", "Korea" inside
+# "Republic of Korea". The longer match subsumes the shorter one.
+
+SUBSUMED_COUNTRIES = [
+    ('papua-new-guinea', 'PG', 'PG', 'Papua New Guinea', '巴布亞新幾內亞', '巴布亚新几内亚'),
+    ('guinea', 'GN', 'GN', 'Guinea', '幾內亞', '几内亚'),
+]
+
+
+def test_a_catalogue_name_inside_a_longer_one_is_not_a_conflict(tmp_path):
+    """The shorter name must not be read as a second, rival country."""
+    master = build_master(tmp_path / 'master', countries=SUBSUMED_COUNTRIES)
+    gaz = geo(tmp_path, extra_rows=[
+        _row(21, 'Papua New Guinea', 'PG', 'A', 'PCLI', '00', 10000000),
+    ])
+    result = classify(rec('Papua New Guinea'), gaz, master)
+    assert result.status == 'MATCHED' and result.hkp_code == 'PG'
+
+
+def test_a_geographic_rival_inside_a_longer_match_is_not_a_rival(tmp_path):
+    """The same rule for the gazetteer: a subsumed place is not a rival."""
+    master = build_master(tmp_path / 'master', countries=[
+        SUBSUMED_COUNTRIES[0],
+    ])
+    gaz = geo(tmp_path, extra_rows=[
+        _row(21, 'Papua New Guinea', 'PG', 'A', 'PCLI', '00', 10000000),
+        _row(22, 'Guinea', 'GN', 'A', 'PCLI', '00', 13000000),
+    ])
+    result = classify(rec('Papua New Guinea'), gaz, master)
+    assert result.status == 'MATCHED' and result.hkp_code == 'PG'
+
+
+def test_an_official_territory_name_is_not_split_into_its_parts(tmp_path):
+    """The territory name carries its islands; the parts are not rivals.
+
+    "Pitcairn, Henderson, Ducie and Oeno Islands" is the official name of
+    one territory. The words "Pitcairn" and "Henderson" also name places
+    in other countries, but they are only a less specific reading of the
+    very same words.
+    """
+    master = build_master(tmp_path / 'master', countries=[
+        ('united-states', 'US', 'US', 'United States', '美國', '美国'),
+    ])
+    gaz = geo(tmp_path, extra_rows=[
+        _row(21, 'Pitcairn, Henderson, Ducie and Oeno Islands', 'PN', 'A', 'PCLD', '00', 46),
+        _row(22, 'Henderson', 'US', 'P', 'PPL', '01', 300000),
+        _row(23, 'Pitcairn', 'US', 'P', 'PPL', '01', 200000),
+    ])
+    result = classify(rec('Pitcairn, Henderson, Ducie and Oeno Islands'), gaz, master)
+    # The territory resolves; the master issues no code for it.
+    assert result.status == 'REVIEW_CODE_MAPPING'
+    assert result.hkp_code is None
+    assert 'GEOGRAPHY:PN' in result.evidence
+
+
+def test_a_place_name_alone_is_still_ambiguous(tmp_path):
+    """The subsumption must not fire when no longer match exists."""
+    master = build_master(tmp_path / 'master', countries=[
+        ('united-states', 'US', 'US', 'United States', '美國', '美国'),
+        ('new-zealand', 'NZ', 'NZ', 'New Zealand', '新西蘭', '新西兰'),
+    ])
+    gaz = geo(tmp_path, extra_rows=[
+        _row(21, 'Henderson', 'US', 'P', 'PPL', '01', 5000),
+        _row(22, 'Henderson', 'NZ', 'P', 'PPL', '01', 4000),
+    ])
+    result = classify(rec('Henderson'), gaz, master)
+    assert result.status in ('REVIEW_AMBIGUOUS', 'UNKNOWN')
+    assert result.hkp_code is None
 

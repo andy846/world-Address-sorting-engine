@@ -327,6 +327,27 @@ def _resolve_hint(hint: str | None, catalogue: _Catalogue) -> str | None:
     return None
 
 
+def _word_count(term: str) -> int:
+    """The number of words in a canonical search term or a catalogue name."""
+    return len(term.split())
+
+
+def _subsumes(bigger: set[str], smaller: set[str]) -> bool:
+    """True when a term of `bigger` holds a term of `smaller` as a word run.
+
+    A longer match that contains the shorter one is a more specific reading
+    of the same words: "Guinea" inside "Papua New Guinea", "Korea" inside
+    "Republic of Korea", "Henderson" inside "Pitcairn, Henderson, Ducie and
+    Oeno Islands". The shorter reading is therefore not an independent
+    hypothesis about the address.
+    """
+    for big in bigger:
+        for small in smaller:
+            if _word_count(big) > _word_count(small) and contains_keyed(big, small):
+                return True
+    return False
+
+
 def classify_record(record: AddressRecord, geo_db: Path, hkp_db: Path,
                     approval: CatalogueApproval | None = None) -> ClassificationResult:
     """Classify one record against the reference pack and the HKP master."""
@@ -353,20 +374,35 @@ def classify_record(record: AddressRecord, geo_db: Path, hkp_db: Path,
     candidates = retrieve_candidates(Path(geo_db), normalize_address(scope), record.country_hint)
     support, tokens, entity, strong, terms, entity_only = _effective_support(candidates, scope)
 
-    assertions: dict[str, str] = {}
+    assertion_alias: dict[str, str] = {}
+    withdrawn_alias: dict[str, str] = {}
     # A country name that appears only inside a company or street name is
     # withdrawn from the evidence, but it still contradicts a different
     # destination rather than silently agreeing with one.
-    withdrawn_names: dict[str, str] = {}
     scope_key = normalize_key(scope)
     for iso, aliases in catalogue.names_by_iso.items():
         for alias in aliases:
             if alias and contains_keyed(scope_key, alias):
                 if _is_company_adjacent(scope, alias):
-                    withdrawn_names.setdefault(iso, 'CATALOGUE_NAME_WITHDRAWN')
+                    withdrawn_alias.setdefault(iso, alias)
                 else:
-                    assertions[iso] = 'CATALOGUE_NAME'
+                    assertion_alias[iso] = alias
                 break
+    # A country name that is a whole word inside a longer matched country
+    # name is the same country, not a second one. "Guinea" inside "Papua
+    # New Guinea" would otherwise be read as a contradiction.
+    matched_alias = {**assertion_alias, **withdrawn_alias}
+    normalized_alias = {iso: normalize_key(alias) for iso, alias in matched_alias.items()}
+    subsumed = {iso for iso, alias in matched_alias.items()
+                if any(other != iso and len(normalized_alias[other]) > len(alias)
+                       and contains_keyed(normalized_alias[other], alias)
+                       for other in matched_alias)}
+    assertion_alias = {iso: alias for iso, alias in assertion_alias.items()
+                        if iso not in subsumed}
+    withdrawn_alias = {iso: alias for iso, alias in withdrawn_alias.items()
+                       if iso not in subsumed}
+    assertions = {iso: 'CATALOGUE_NAME' for iso in assertion_alias}
+    withdrawn_names = dict(withdrawn_alias)
     hint_iso = _resolve_hint(record.country_hint, catalogue)
     if hint_iso:
         assertions.setdefault(hint_iso, 'STRUCTURED_HINT')
@@ -377,8 +413,19 @@ def classify_record(record: AddressRecord, geo_db: Path, hkp_db: Path,
                 and (tokens.get(iso, 0) >= 2 or entity.get(iso, False)))
 
     def independent(iso: str, leader: str) -> bool:
-        """A rival must contribute evidence the leader does not also have."""
-        return bool(terms.get(iso, set()) - terms.get(leader, set()))
+        """A rival must contribute evidence the leader does not also have.
+
+        A rival whose remaining terms all sit inside a longer term of the
+        leader is a less specific reading of the very same words, so it is
+        not a rival at all.
+        """
+        leader_terms = terms.get(leader, set())
+        own = terms.get(iso, set()) - leader_terms
+        if not own:
+            return False
+        return any(all(not _subsumes({leader_term}, {term})
+                       for leader_term in leader_terms)
+                   for term in own)
 
     def matched(iso: str):
         destination_id = catalogue.iso_to_destination.get(iso)
