@@ -1,0 +1,56 @@
+name: Build GeoNames full global SQLite packs
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/hkp-trilingual-phase1
+    paths:
+      - ".github/workflows/build-geonames.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  full-global-db:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install local package and tests
+        run: python -m pip install -e ".[excel,test]"
+      - name: Run full regression before global build
+        run: python -m pytest -q
+      - name: Verify runner disk capacity
+        run: df -h / && free -h
+      - name: Download official GeoNames global ZIPs and pin hashes
+        run: python tools/download_geonames.py --source-dir /tmp/geonames-upstream
+      - name: Stream-build Compact and Extended SQLite with actual measurements
+        run: python tools/build_reference_pack.py --source-dir /tmp/geonames-upstream --output-dir /tmp/geonames-built --both --compress
+      - name: Print recorded actual DB metrics
+        if: success()
+        run: |
+          python -m json.tool /tmp/geonames-built/build_report.json
+          du -h /tmp/geonames-built/*.sqlite /tmp/geonames-built/*.zip
+      - name: Publish size report even if one profile fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: geonames-size-build-report
+          path: |
+            /tmp/geonames-upstream/source_manifest.json
+            /tmp/geonames-built/build_report.json
+          retention-days: 14
+          if-no-files-found: warn
+      - name: Publish SQLite distribution archives
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: geonames-global-sqlite-zips
+          path: /tmp/geonames-built/*.sqlite.zip
+          retention-days: 7
+          compression-level: 0
+          if-no-files-found: error
