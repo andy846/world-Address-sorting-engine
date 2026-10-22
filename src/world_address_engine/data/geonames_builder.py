@@ -9,6 +9,8 @@ import os
 import sqlite3
 import tempfile
 import unicodedata
+import zipfile
+from io import TextIOWrapper
 from pathlib import Path
 
 PROFILES = frozenset({"COMPACT_GLOBAL", "EXTENDED_GLOBAL"})
@@ -39,15 +41,28 @@ def _insert_alias(conn: sqlite3.Connection, place_id: int, alias: str, language:
 
 
 def _lines(path: Path):
-    with path.open("r", encoding="utf-8", errors="strict") as f:
-        for line in f:
-            if line and not line.startswith("#"):
-                yield line.rstrip("\r\n").split("\t")
+    """Read .txt directly or stream the matching GeoNames .zip member."""
+    if path.is_file():
+        with path.open("r", encoding="utf-8", errors="strict") as f:
+            for line in f:
+                if line and not line.startswith("#"):
+                    yield line.rstrip("\r\n").split("\t")
+    else:
+        archive = path.with_suffix(".zip")
+        if not archive.is_file():
+            raise FileNotFoundError(f"GeoNames source missing: {path} or {archive}")
+        with zipfile.ZipFile(archive) as zf:
+            if path.name not in zf.namelist():
+                raise ValueError(f"GeoNames ZIP missing {path.name}: {archive}")
+            with zf.open(path.name) as binary, TextIOWrapper(binary, encoding="utf-8") as stream:
+                for line in stream:
+                    if line and not line.startswith("#"):
+                        yield line.rstrip("\r\n").split("\t")
 
 
 def _compact_ids(path: Path) -> set[int]:
-    if not path.is_file():
-        raise FileNotFoundError(f"GeoNames cities1000.txt missing: {path}")
+    if not path.is_file() and not path.with_suffix(".zip").is_file():
+        raise FileNotFoundError(f"GeoNames cities1000 source missing: {path}")
     return {int(parts[0]) for parts in _lines(path) if len(parts) >= 9 and parts[0].isdigit()}
 
 
@@ -64,8 +79,8 @@ def build_geonames_pack(source_dir: Path, target_db: Path, profile: str) -> dict
     source_dir, target_db = Path(source_dir), Path(target_db)
     main_file = source_dir / "allCountries.txt"
     alternate_file = source_dir / "alternateNamesV2.txt"
-    if not main_file.is_file() or not alternate_file.is_file():
-        raise FileNotFoundError("GeoNames allCountries.txt and alternateNamesV2.txt required")
+    if any(not p.is_file() and not p.with_suffix(".zip").is_file() for p in (main_file, alternate_file)):
+        raise FileNotFoundError("GeoNames allCountries and alternateNamesV2 .zip/.txt sources required")
     compact = _compact_ids(source_dir / "cities1000.txt") if profile == "COMPACT_GLOBAL" else None
     target_db.parent.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(prefix=".geonames-", suffix=".db", dir=target_db.parent)
@@ -123,9 +138,13 @@ def build_geonames_pack(source_dir: Path, target_db: Path, profile: str) -> dict
             conn.execute("CREATE INDEX idx_geo_alias_key ON geo_aliases(search_key, place_id)")
             conn.execute("CREATE INDEX idx_geo_country_admin ON geo_places(country_code, admin1_code, admin2_code)")
             conn.commit()
+            conn.execute("ANALYZE")
+            conn.execute("VACUUM")
+            if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise ValueError("GeoNames SQLite integrity_check failed")
             place_count = conn.execute("SELECT COUNT(*) FROM geo_places").fetchone()[0]
             alias_count = conn.execute("SELECT COUNT(*) FROM geo_aliases").fetchone()[0]
         os.replace(temporary_db, target_db)
-        return {"place_count": place_count, "alias_count": alias_count}
+        return {"place_count": place_count, "alias_count": alias_count, "sqlite_bytes": target_db.stat().st_size}
     finally:
         temporary_db.unlink(missing_ok=True)
