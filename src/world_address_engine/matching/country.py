@@ -174,6 +174,8 @@ class CountryClassifier:
 
     def _eligible_lines(self, lines):
         locations = _location_lines(lines)
+        if len(lines) == 1:
+            return locations
         start = next((i for i, line in locations if _ADDRESS.search(line)), len(lines))
         result = []
         for i, line in locations:

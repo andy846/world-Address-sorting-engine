@@ -83,6 +83,21 @@ def main(argv: list[str] | None=None) -> int:
                           help='Deprecated compatibility flag; verification is always enabled')
     classify.add_argument('--keep-checkpoint', action='store_true',
                         help='Keep the plaintext customer checkpoint shards after the run')
+    analyze = sub.add_parser('analyze', help='Estimate country codes fully offline without an HKP database')
+    analyze.add_argument('--input', type=Path, required=True)
+    analyze.add_argument('--output', type=Path, required=True)
+    analyze.add_argument('--geo-db', type=Path, required=True)
+    analyze.add_argument('--catalogue', type=Path)
+    analyze.add_argument('--encoding', default='utf-8-sig')
+    analyze.add_argument('--address-column', action='append', default=[])
+    analyze.add_argument('--record-id-column')
+    analyze.add_argument('--sheet')
+    analyze.add_argument('--txt-mode', choices=['line', 'delimited'], default='line')
+    analyze.add_argument('--delimiter')
+    analyze.add_argument('--batch-size', type=int, default=1000)
+    analyze.add_argument('--max-batches', type=int)
+    analyze.add_argument('--keep-checkpoint', action='store_true',
+                         help='Keep sensitive plaintext country checkpoint shards after completion')
     resume = sub.add_parser('resume', help='Resume a paused run with source and data-pack integrity checks')
     resume.add_argument('--job-dir', type=Path, required=True)
     resume.add_argument('--max-batches', type=int)
@@ -107,6 +122,22 @@ def main(argv: list[str] | None=None) -> int:
                            approval_manifest=args.approval_manifest,
                            approval_key=args.approval_key,
                            keep_checkpoint=args.keep_checkpoint)
+        elif args.command == 'analyze':
+            from world_address_engine.jobs.country_analysis import analyze_job
+            options = {'encoding': args.encoding, 'address_columns': args.address_column,
+                       'record_id_column': args.record_id_column, 'sheet_name': args.sheet,
+                       'txt_mode': args.txt_mode, 'delimiter': args.delimiter}
+            report = analyze_job(args.input, args.output, args.geo_db, options,
+                                 catalogue_path=args.catalogue, batch_size=args.batch_size,
+                                 max_batches=args.max_batches, keep_checkpoint=args.keep_checkpoint)
+        elif any((args.job_dir / name).is_dir()
+                 for name in ('.country-state', '.country-finalize')) or (
+                (args.job_dir / 'Run_Manifest.json').is_file()
+                and json.loads((args.job_dir / 'Run_Manifest.json').read_text(encoding='utf8'))
+                    .get('job_kind') == 'country-analysis'):
+            from world_address_engine.jobs.country_analysis import resume_analysis
+            report = resume_analysis(args.job_dir, max_batches=args.max_batches,
+                                     keep_checkpoint=args.keep_checkpoint)
         else:
             from world_address_engine.jobs.runner import resume_job
             report=resume_job(args.job_dir,max_batches=args.max_batches,

@@ -25,6 +25,7 @@ packs/
 # as local JSONL checkpoints and must never be committed or uploaded.
 .job-state/
 .country-state/
+.country-finalize/
 .country-finalization.json
 *-country-analysis/
 test-output/

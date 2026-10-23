@@ -118,6 +118,7 @@ def test_country_analysis_does_not_modify_the_source_record(tmp_path):
     ('Example Person\n12 Bank Street London', 'GB'),
     ('Example Person\nP.R.CHINA\n12 Example Road', 'CN'),
     ('Example Person\n\u4e2d\u56fd\u5e7f\u4e1c\u7701\n12 Example Road', 'CN'),
+    ('Tokyo Japan', 'JP'),
 ])
 def test_independent_review_and_locality_regressions(tmp_path, text, code):
     with CountryClassifier(geo(tmp_path), catalogue()) as classifier:
