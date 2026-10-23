@@ -3,9 +3,11 @@ name: Windows regression suite
 on:
   push:
     branches:
+      - main
       - feat/hkp-trilingual-phase1
   pull_request:
     branches:
+      - main
       - feat/hkp-trilingual-phase1
   workflow_dispatch:
 

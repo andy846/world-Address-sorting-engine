@@ -1,5 +1,11 @@
 # Codex Execution Handoff — World Address Sorting Engine
 
+> **Integration update (2026-10-23):** After the verified alpha.1 release,
+> the user explicitly authorized merging the development branch through
+> PR #1 into `main`. This supersedes the historical Draft/no-merge directions
+> below. Production acceptance gates and existing release identities remain
+> unchanged. See `docs/releases/v0.1.0-alpha.1-validation.md` for release evidence.
+
 > **Current date:** 2026-10-23  
 > **Repository:** `andy846/world-Address-sorting-engine` (PRIVATE)  
 > **Work branch:** `feat/hkp-trilingual-phase1`  
