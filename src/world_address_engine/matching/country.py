@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import re
 import sqlite3
@@ -12,7 +12,7 @@ from world_address_engine.matching.normalize import normalize_address, normalize
 from world_address_engine.matching.retrieve import retrieve_candidates, OccurrenceLimitExceeded
 from world_address_engine.models import AddressRecord
 
-COUNTRY_RULES_VERSION = '2026-10-23.country.1'
+COUNTRY_RULES_VERSION = '2026-10-24.country.2'
 RIVAL_RATIO = 0.55
 MAX_ADDRESS_CHARS = 10_000
 
@@ -85,6 +85,7 @@ HK_AREAS = (
     '石塘咀', '黃竹坑', '黄竹坑', '小西灣', '小西湾', '秀茂坪', '錦田',
     '锦田', '八鄉', '八乡', '流浮山', '沙頭角', '沙头角', '太古',
     '大坑', '新田', '落馬洲', '落马洲',
+    'shek mun', 'lai king', '石門', '石门', '荔景',
 )
 HK_AREAS = tuple(dict.fromkeys((*HK_AREAS, *(name.replace(' ', '')
                             for name in HK_AREAS if ' ' in name))))
@@ -99,6 +100,7 @@ CN_REGIONS = (
     'hunan', 'anhui', 'jiangxi', 'hainan', 'sichuan', 'guizhou', 'yunnan',
     'shaanxi', 'shanxi', 'liaoning', 'jilin', 'heilongjiang', 'gansu',
     'qinghai', 'ningxia', 'xinjiang', 'tibet', 'inner mongolia',
+    '深圳', '廣州', '广州', '杭州', 'shenzhen', 'guangzhou', 'hangzhou',
 )
 _COMPANY = re.compile(
     r'\b(?:ltd|limited|inc|llc|corp|corporation|company|bank|holdings|trading|logistics)\b'
@@ -108,6 +110,17 @@ _RECIPIENT = re.compile(r'^(?:mr|mrs|ms|miss|dr|prof|attn|attention)\.?\s|^(?:�
 _STREET_AFTER = re.compile(r'^\s*(?:street|st|road|rd|avenue|ave|lane|ln|drive|dr|boulevard|blvd)\b|^[街路巷弄]', re.I)
 _STREET_ADDRESS = re.compile(
     r'^\s*\d+[a-z]?\s+.+\b(?:street|st|road|rd|avenue|ave|lane|ln|drive|dr|boulevard|blvd)\b', re.I)
+_BUILDING_AFTER = re.compile(
+    r'^\s*(?:centre|center|building|tower|plaza|house|bank|university|hospital)\b'
+    r'|^\s*(?:中心|大廈|大厦|大樓|大楼|廣場|广场|銀行|银行|大學|大学|橋|桥)', re.I)
+_HK_BORDER_NAMES = frozenset({'sha tau kok', 'shataukok', '沙頭角', '沙头角',
+                              'lok ma chau', 'lokmachau', '落馬洲', '落马洲'})
+_HK_CENTRAL_STREETS = re.compile(
+    r'\b(?:des\s+voeux\s+(?:road|rd)|connaught\s+(?:road|rd|place)|'
+    r'wing\s+kut\s+(?:street|st))\b')
+_HK_JORDAN_STREETS = re.compile(
+    r'\b(?:tak\s+hing|nanking|woosung|woo\s+sung|nathan|canton)\s+(?:street|st|road|rd)\b')
+_HK_TST_TAIL = re.compile(r'(?<![a-z])t\.?\s*s\.?\s*t\.?(?![a-z])\s*[,.;]*$')
 
 
 def _location_lines(lines):
@@ -123,12 +136,17 @@ def _location_lines(lines):
     return result
 
 
-def _regional_match(scope, names):
+def _regional_names(scope, names):
     for name in names:
         for match in re.finditer(_pattern(name), scope):
-            if not _STREET_AFTER.match(scope[match.end():]):
-                return True
-    return False
+            suffix = scope[match.end():].split('\n', 1)[0]
+            if not (_STREET_AFTER.match(suffix) or _BUILDING_AFTER.match(suffix)):
+                yield name
+                break
+
+
+def _regional_match(scope, names):
+    return next(_regional_names(scope, names), None) is not None
 
 
 def _pattern(name):
@@ -139,7 +157,23 @@ def _pattern(name):
 
 
 def _contains(text, name):
-    return re.search(_pattern(name), text) is not None
+    return any(not (_STREET_AFTER.match(line[match.end():]) or
+                    _BUILDING_AFTER.match(line[match.end():]))
+               for line in text.splitlines() for match in re.finditer(_pattern(name), line))
+
+
+def _hk_context(lines):
+    scope = '\n'.join(line for _i, line in lines)
+    if not _ADDRESS.search(scope):
+        return False
+    if any(_HK_TST_TAIL.search(line) for _i, line in lines[-2:]):
+        return True
+    if _contains(scope, 'jordan') and _HK_JORDAN_STREETS.search(scope):
+        return True
+    if _contains(scope, 'central') and _HK_CENTRAL_STREETS.search(scope):
+        return True
+    return bool(_contains(scope, 'admiralty') and
+                re.search(r'\bqueensway\b', scope))
 
 
 _WHOLE_REGION = re.compile('(?:' + '|'.join(_pattern(name) for name in (*CN_REGIONS, *HK_AREAS))
@@ -222,9 +256,27 @@ class CountryClassifier:
             self._cache.move_to_end(key)
         return CountryInference(record.record_no, *value)
 
-    def _explicit(self, lines):
+    def _explicit(self, lines, cleaned=None):
         found = set()
-        eligible = {i for i, _line in self._eligible_lines(lines)}
+        eligible_lines = self._eligible_lines(lines)
+        eligible = {i for i, _line in eligible_lines}
+        hk_jordan = (_hk_context(eligible_lines) or
+                     any(_contains(line, 'hong kong') or _contains(line, '香港') or
+                         re.search(r'(?<![a-z])(?:h\.?\s?k\.?|kln)\s*[,.;]*$', line)
+                         for _i, line in eligible_lines))
+        jordan_destination = False
+        if hk_jordan and any(_contains(line, 'jordan') for _i, line in eligible_lines):
+            scope = '\n'.join(line for _i, line in eligible_lines)
+            try:
+                candidates = self._substantial_candidates(
+                    retrieve_candidates(self.geo_db, normalize_address(scope)), scope)
+                jordan_destination = any(
+                    c.destination_id == 'JO' and any(term not in c.entity_terms
+                                                     for term, _weight, _id in c.place_support)
+                    for c in candidates)
+            except OccurrenceLimitExceeded:
+                # Do not withdraw explicit country evidence on an incomplete scan.
+                jordan_destination = True
         for index, line in _location_lines(lines):
             territory = re.search(
                 r'(?<![a-z])(hong[\s-]*kong|macau|macao|香港|澳門|澳门)(?:\s+sar)?'
@@ -240,15 +292,30 @@ class CountryClassifier:
             if code in self.catalogue.entries and index >= max(0, len(lines) - 2):
                 found.add(code)
             if index >= max(0, len(lines) - 2):
-                tail = re.search(r'(?<![a-z])(?:h\.?\s?k\.?|kln|u\.?\s?k\.?)\s*[,.]*$', line)
+                tail = re.search(r'(?<![a-z])(?:h\.?\s?k\.?|kln|u\.?\s?k\.?)'
+                                 r'(?:\s+[0-9][0-9 -]*)?\s*[,.]*$', line)
                 if tail:
                     code = 'GB' if tail[0].startswith('u') else 'HK'
                     if code in self.catalogue.entries:
                         found.add(code)
             spans = []
+            blocked = []
             for code, alias, pattern in self._names:
                 for match in pattern.finditer(line):
                     if any(left <= match.start() and right >= match.end() for left, right in spans):
+                        continue
+                    # Inner Mongolia is an administrative name, not Mongolia.
+                    if code == 'MN' and (
+                        (alias == '蒙古' and line[max(0, match.start() - 1):match.start()] in {'內', '内'}) or
+                        (alias == 'mongolia' and re.search(r'\binner\s+$', line[:match.start()]))
+                    ):
+                        spans.append(match.span())
+                        continue
+                    suffix = line[match.end():]
+                    jordan_local = code == 'JO' and alias == 'jordan' and hk_jordan and not jordan_destination
+                    if _STREET_AFTER.match(suffix) or _BUILDING_AFTER.match(suffix) or jordan_local:
+                        spans.append(match.span())
+                        blocked.append(match.span())
                         continue
                     remainder = line[match.end():].strip(' ,.;:/()-')
                     han = any('\u3400' <= char <= '\u9fff' for char in alias)
@@ -259,6 +326,11 @@ class CountryClassifier:
                         continue
                     found.add(code)
                     spans.append(match.span())
+            if cleaned is not None and blocked:
+                chars = list(line)
+                for left, right in blocked:
+                    chars[left:right] = ' ' * (right - left)
+                cleaned[index] = ''.join(chars)
         return found
 
     def _infer(self, text, hint):
@@ -266,7 +338,8 @@ class CountryClassifier:
                  for value in text.splitlines() if value.strip()]
         if not lines and not hint:
             return (None, 'UNRESOLVED', 'EMPTY_ADDRESS', (), ())
-        explicit = self._explicit(lines)
+        cleaned = {}
+        explicit = self._explicit(lines, cleaned)
         if hint:
             hint_key = normalize_key(hint)
             if hint_key.upper() in self.catalogue.entries:
@@ -280,12 +353,16 @@ class CountryClassifier:
 
         # The first line remains available when it is geographic; a recipient
         # or business name is not allowed to supply regional evidence alone.
-        address_lines = [line for _i, line in self._eligible_lines(lines)]
+        eligible_lines = self._eligible_lines(lines)
+        address_lines = [cleaned.get(i, line) for i, line in eligible_lines]
         scope = '\n'.join(address_lines)
         cn = _regional_match(scope, CN_REGIONS)
-        hk = _regional_match(scope, HK_AREAS)
+        hk_names = set(_regional_names(scope, HK_AREAS))
+        hk = bool(hk_names) or _hk_context(eligible_lines)
         if cn and hk:
-            return (None, 'UNRESOLVED', 'CONFLICTING_ADMINISTRATIVE_REGIONS', (), ('CN', 'HK'))
+            mainland_admin = re.search(r'(?:深圳|廣州|广州|杭州)市|[省市].{0,12}[區区縣县]', scope)
+            if not (mainland_admin and hk_names and hk_names <= _HK_BORDER_NAMES):
+                return (None, 'UNRESOLVED', 'CONFLICTING_ADMINISTRATIVE_REGIONS', (), ('CN', 'HK'))
         if cn and 'CN' in self.catalogue.entries:
             return ('CN', 'INFERRED', 'MAINLAND_ADMINISTRATIVE_REGION', (), ())
         if hk and 'HK' in self.catalogue.entries:
@@ -296,7 +373,7 @@ class CountryClassifier:
             candidates = retrieve_candidates(self.geo_db, normalize_address(scope))
         except OccurrenceLimitExceeded:
             return (None, 'UNRESOLVED', 'GEOGRAPHIC_OCCURRENCE_LIMIT', (), ())
-        candidates = self._substantial_candidates(candidates)
+        candidates = self._substantial_candidates(candidates, scope)
         grouped = {}
         for candidate in candidates:
             code = self.catalogue.geo_to_code.get(candidate.destination_id)
@@ -312,24 +389,53 @@ class CountryClassifier:
             return (None, 'UNRESOLVED', 'MULTIPLE_PLAUSIBLE_COUNTRIES', (), tuple(ordered[:5]))
         return (leader, 'INFERRED', 'GEOGRAPHIC_LEADER', (), tuple(ordered[:5]))
 
-    def _substantial_candidates(self, candidates):
+    def _substantial_candidates(self, candidates, scope):
         if not candidates:
             return []
-        ids = {int(item.split(':', 2)[1]) for c in candidates for item in c.evidence
-               if item.startswith('PLACE:')}
+        ids = {place_id for c in candidates for _term, _weight, place_id in c.place_support}
         if not ids:
             return []
         if self._db is None:
             self._db = sqlite3.connect(self.geo_db.resolve().as_uri() + '?mode=ro', uri=True)
             self._db.execute('PRAGMA query_only=ON')
-        qualified = set()
+        qualified = {}
         values = sorted(ids)
         for start in range(0, len(values), 200):
             chunk = values[start:start + 200]
             rows = self._db.execute(
-                'SELECT country_code,feature_code,population FROM geo_places '
+                'SELECT place_id,country_code,feature_code,population FROM geo_places '
                 'WHERE place_id IN (' + ','.join('?' * len(chunk)) + ')', chunk)
-            for country, feature, population in rows:
+            for place_id, country, feature, population in rows:
                 if feature in {'PCLI', 'PCLX', 'PCLS', 'PCLD', 'ADM1', 'ADM2', 'PPLC', 'PPLA'} or (population or 0) >= 100_000:
-                    qualified.add(country)
-        return [c for c in candidates if c.destination_id in qualified and c.support >= 0.15]
+                    qualified[place_id] = country
+        forms = tuple(form for line in scope.splitlines() for form in normalize_address(line))
+        roles = {}
+        for candidate in candidates:
+            for term, _weight, _place_id in candidate.place_support:
+                if term not in roles:
+                    roles[term] = any(
+                        not (_STREET_AFTER.match(line[match.end():]) or
+                             _BUILDING_AFTER.match(line[match.end():]))
+                        for form in forms for line in form.splitlines()
+                        for match in re.finditer(_pattern(term), line))
+        results = []
+        for candidate in candidates:
+            kept = tuple((term, weight, place_id)
+                         for term, weight, place_id in candidate.place_support
+                         if qualified.get(place_id) == candidate.destination_id and roles[term])
+            support = sum(weight for _term, weight, _id in kept)
+            if support < 0.15:
+                continue
+            terms = {term for term, _weight, _id in kept}
+            kept_ids = {place_id for _term, _weight, place_id in kept}
+            results.append(replace(
+                candidate, support=support, score=min(0.99, support),
+                token_count=len(kept), place_support=kept,
+                term_support=tuple((term, weight) for term, weight, _id in kept),
+                entity_terms=tuple(term for term in candidate.entity_terms if term in terms),
+                entity_feature_codes=tuple((term, code) for term, code in candidate.entity_feature_codes
+                                           if term in terms),
+                country_entity=any(weight >= 0.60 for _term, weight, _id in kept),
+                evidence=tuple(entry for entry in candidate.evidence
+                               if entry.startswith('PLACE:') and int(entry.split(':', 2)[1]) in kept_ids)))
+        return results
