@@ -12,6 +12,7 @@ from world_address_engine.matching.retrieve import retrieve_candidates
 @pytest.mark.parametrize('address', [
     '12 Example Road\nTST',
     '12 Example Road\nT.S.T.',
+    '12 Example Road\nTST KL',
     '12 Example Road\nTsimshatsui',
     '12 Tak Hing Street\nJordan',
     '12 Nanking Street\nJordan KL',
@@ -26,6 +27,9 @@ from world_address_engine.matching.retrieve import retrieve_candidates
     'The Example Building\n12 Austin Road West\nTST',
     '12 Example Road\nShek Mun, N.T.',
     '12 Example Road\nLai King NT',
+    'Tsim Sha Tsui Centre\n12 Mody Road',
+    'Tai Po Plaza\n12 Example Road\nNT',
+    '12 Connaught Road West\nSai Wan',
 ])
 def test_contextual_hong_kong_locations(tmp_path, address):
     with CountryClassifier(geo(tmp_path), catalogue()) as classifier:
@@ -53,6 +57,7 @@ def test_generic_words_and_unanchored_abbreviations_do_not_assume_hk(tmp_path, a
     ('12 Tak Hing Street\nJordan\nJapan', 'JP'),
     ('12 Example Road\nHong Kong\nJapan', None),
     ('12 Example Road\nGuangdong Province\nKowloon', None),
+    ('\u6df1\u5733\u5e02\u5357\u5c71\u533a\n\u6c99\u7530', None),
 ])
 def test_foreign_destinations_and_genuine_conflicts_are_preserved(tmp_path, address, code):
     with CountryClassifier(geo(tmp_path), catalogue()) as classifier:
@@ -66,6 +71,9 @@ def test_foreign_destinations_and_genuine_conflicts_are_preserved(tmp_path, addr
     '\u5e7f\u4e1c\u7701\u6df1\u5733\u5e02\u76d0\u7530\u533a\n\u6c99\u5934\u89d2\u4f8b\u5b50\u8def\u5341\u53f7',
     '\u6df1\u5733\u5e02\u7f57\u6e56\u533a\n\u4f8b\u5b50\u8def\u5341\u53f7',
     '\u5167\u8499\u53e4\u81ea\u6cbb\u5340\n\u4f8b\u5b50\u8def\u5341\u53f7',
+    '\u6df1\u5733\u5e02\u798f\u7530\u533a\n\u91d1\u4e2d\u73af\u5546\u52a1\u5927\u53a6\u5341\u697c',
+    '\u6df1\u5733\u5e02\u576a\u5c71\u533a\n\u6c99\u7530\u793e\u533a\u4f8b\u5b50\u8def\u5341\u53f7',
+    '\u6df1\u5733\u5e02\u5357\u5c71\u533a\n\u534a\u5c71\u82b1\u5712\u5341\u6a13',
 ])
 def test_mainland_admin_and_buildings_do_not_create_foreign_conflicts(tmp_path, address):
     with CountryClassifier(geo(tmp_path), catalogue()) as classifier:

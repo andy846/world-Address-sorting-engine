@@ -112,15 +112,18 @@ _STREET_ADDRESS = re.compile(
     r'^\s*\d+[a-z]?\s+.+\b(?:street|st|road|rd|avenue|ave|lane|ln|drive|dr|boulevard|blvd)\b', re.I)
 _BUILDING_AFTER = re.compile(
     r'^\s*(?:centre|center|building|tower|plaza|house|bank|university|hospital)\b'
-    r'|^\s*(?:中心|大廈|大厦|大樓|大楼|廣場|广场|銀行|银行|大學|大学|橋|桥)', re.I)
-_HK_BORDER_NAMES = frozenset({'sha tau kok', 'shataukok', '沙頭角', '沙头角',
-                              'lok ma chau', 'lokmachau', '落馬洲', '落马洲'})
+    r'|^\s*(?:中心|大廈|大厦|大樓|大楼|廣場|广场|銀行|银行|大學|大学|橋|桥)'
+    r'|^\s*(?:國際|国际)?(?:商務|商务|商業|商业)(?:大廈|大厦|中心|樓|楼)', re.I)
+_HK_SHARED_LOCALITIES = frozenset({'sha tau kok', 'shataukok', '沙頭角', '沙头角',
+                              'lok ma chau', 'lokmachau', '落馬洲', '落马洲',
+                              '沙田', '半山', '中環', '中环'})
 _HK_CENTRAL_STREETS = re.compile(
     r'\b(?:des\s+voeux\s+(?:road|rd)|connaught\s+(?:road|rd|place)|'
     r'wing\s+kut\s+(?:street|st))\b')
 _HK_JORDAN_STREETS = re.compile(
     r'\b(?:tak\s+hing|nanking|woosung|woo\s+sung|nathan|canton)\s+(?:street|st|road|rd)\b')
-_HK_TST_TAIL = re.compile(r'(?<![a-z])t\.?\s*s\.?\s*t\.?(?![a-z])\s*[,.;]*$')
+_HK_TST_TAIL = re.compile(r'(?<![a-z])t\.?\s*s\.?\s*t\.?(?![a-z])'
+                          r'(?:[\s,]+kl[n]?)?\s*[,.;]*$')
 
 
 def _location_lines(lines):
@@ -171,6 +174,15 @@ def _hk_context(lines):
     if _contains(scope, 'jordan') and _HK_JORDAN_STREETS.search(scope):
         return True
     if _contains(scope, 'central') and _HK_CENTRAL_STREETS.search(scope):
+        return True
+    if (_contains(scope, 'tsim sha tsui centre') and
+            re.search(r'\bmody\s+(?:road|rd)\b', scope)):
+        return True
+    if (_contains(scope, 'tai po plaza') and lines and
+            re.fullmatch(r'n\.?\s*t\.?,?', lines[-1][1])):
+        return True
+    if (_contains(scope, 'sai wan') and
+            re.search(r'\bconnaught\s+(?:road|rd)\s+west\b', scope)):
         return True
     return bool(_contains(scope, 'admiralty') and
                 re.search(r'\bqueensway\b', scope))
@@ -361,7 +373,9 @@ class CountryClassifier:
         hk = bool(hk_names) or _hk_context(eligible_lines)
         if cn and hk:
             mainland_admin = re.search(r'(?:深圳|廣州|广州|杭州)市|[省市].{0,12}[區区縣县]', scope)
-            if not (mainland_admin and hk_names and hk_names <= _HK_BORDER_NAMES):
+            separate_hk = any(re.fullmatch(_pattern(name), line.strip(' ,.;'))
+                              for name in hk_names for line in address_lines)
+            if not (mainland_admin and hk_names and hk_names <= _HK_SHARED_LOCALITIES and not separate_hk):
                 return (None, 'UNRESOLVED', 'CONFLICTING_ADMINISTRATIVE_REGIONS', (), ('CN', 'HK'))
         if cn and 'CN' in self.catalogue.entries:
             return ('CN', 'INFERRED', 'MAINLAND_ADMINISTRATIVE_REGION', (), ())
