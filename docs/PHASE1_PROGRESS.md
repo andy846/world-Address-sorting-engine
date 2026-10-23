@@ -208,3 +208,37 @@ failure in the 65,976,817-byte onefile executable plus exclusion/report and
 timeout-cleanup gaps. Packaging fixes and nested-name classification fixes
 are in progress. No alpha.1 executable or production readiness is claimed.
 
+## 2026-10-23 - Windows packaging and GUI verification follow-up
+
+Committed and pushed `fbaea39` (release completed GUI callbacks) and
+`1d042bb` (archive inspection, report-file self-test, packaging dependency
+and Windows CI fixes). Independent reviewers accepted both scoped changes.
+The callback weakref test was observed failing before the fix and passing
+afterward. Two subsequent complete local suites passed (455/4 skipped,
+then 457/4 skipped after rule-version checkpoint tests were added); the
+previous native access violation did not recur in those runs.
+
+The QtCore bundle failure was traced to Poppler's incompatible ICU DLL on
+the inherited PATH. Isolating the builder's Python/Windows DLL search paths
+produced a working onefile executable. A rules.4 development snapshot was
+48,469,344 bytes (46.224 MiB) and passed the frozen GUI/event, synthetic
+9,604-row CSV and one-row XLSX preview, and production approval-refusal
+checks. This is startup/preview validation, not a full production mailing
+acceptance test or a newly published alpha.1 executable.
+
+GitHub Windows run
+[39888768810](https://github.com/andy846/world-Address-sorting-engine/actions/runs/39888768810)
+at `1d042bb` succeeded: 284 passed, 122 skipped in 104.36 seconds, including
+the enabled real onefile build/self-test. Real database tests skip on that
+runner because the packs are not checked into Git. Syntax and console
+entry-point checks also succeeded.
+
+Matching changes remain uncommitted pending review fixes. A reviewer found
+that longer country entity names could hide independent conflicts, Unicode
+punctuation could leave Northern Ireland incorrectly assigned to Ireland,
+and repeated-name inputs caused excessive occurrence-processing work. These
+are being corrected with regression tests before any matching release.
+Rule-version pinning and benchmark child-work-directory isolation are also
+under local validation. Full 100k/1M/5M measurements, approved Hongkong Post
+master, onedir runtime and clean offline operator acceptance remain open.
+
