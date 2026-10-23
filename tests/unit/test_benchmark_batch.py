@@ -24,7 +24,9 @@ for extra in (ROOT, ROOT / "tools"):
 
 from benchmark_batch import (  # noqa: E402
     PLACES,
+    _cleanup_measurement_inputs,
     build_fixture_master,
+    git_provenance,
     measure,
     measure_resume,
     peak_rss_bytes,
@@ -67,6 +69,61 @@ def test_every_measurement_runs_in_a_process_of_its_own(tmp_path):
     assert second["peak_rss_bytes"] > 0
 
 
+def test_measurement_uses_its_requested_work_directory(tmp_path):
+    master = build_fixture_master(tmp_path / "master")
+    work = tmp_path / "private-benchmark-work"
+    gazetteer = geo(tmp_path)
+    places = [place for place in PLACES if place[5] in ("JP", "IN")]
+    result = measure(30, master, gazetteer, work, 10, "test", places)
+    root = work / result["measurement_dir"]
+    assert root.parent == work.resolve()
+    assert (root / result["output_dir"] / "Run_Manifest.json").is_file()
+
+
+def test_resume_measurement_uses_its_requested_work_directory(tmp_path):
+    master = build_fixture_master(tmp_path / "master")
+    work = tmp_path / "private-benchmark-work"
+    gazetteer = geo(tmp_path)
+    places = [place for place in PLACES if place[5] in ("JP", "IN")]
+    result = measure_resume(30, master, gazetteer, work, 10, 1, places)
+    root = work / result["measurement_dir"]
+    assert root.parent == work.resolve()
+    assert (root / result["output_dir"] / "Run_Manifest.json").is_file()
+
+
+@pytest.mark.parametrize("kind", ["measure", "resume"])
+def test_measurement_never_deletes_preexisting_work_artifacts(tmp_path, kind):
+    master = build_fixture_master(tmp_path / "master")
+    work = tmp_path / "existing-private-work"
+    work.mkdir()
+    sentinel = work / "run-30"
+    sentinel.mkdir()
+    protected = sentinel / "operator-file.txt"
+    protected.write_text("keep me", encoding="utf-8")
+    places_file = work / "places.json"
+    places_file.write_text("operator data", encoding="utf-8")
+    gazetteer = geo(tmp_path)
+    places = [place for place in PLACES if place[5] in ("JP", "IN")]
+    if kind == "measure":
+        measure(30, master, gazetteer, work, 10, "test", places)
+    else:
+        measure_resume(30, master, gazetteer, work, 10, 1, places)
+    assert protected.read_text(encoding="utf-8") == "keep me"
+    assert places_file.read_text(encoding="utf-8") == "operator data"
+
+
+def test_relative_pack_path_is_resolved_before_the_child_changes_directory(
+        tmp_path, monkeypatch):
+    master = build_fixture_master(tmp_path / "master")
+    gazetteer = geo(tmp_path)
+    work = tmp_path / "private-benchmark-work"
+    places = [place for place in PLACES if place[5] in ("JP", "IN")]
+    monkeypatch.chdir(tmp_path)
+    result = measure(30, master, Path(gazetteer.name), work, 10, "test", places)
+    assert result["pack_sha256"]
+    assert result["rules_version"]
+
+
 def test_a_measurement_that_matched_nothing_is_refused(tmp_path):
     """A throughput number for a run that asserted nothing is not a measurement."""
     master = build_fixture_master(tmp_path / "master")
@@ -75,6 +132,14 @@ def test_a_measurement_that_matched_nothing_is_refused(tmp_path):
     places = [place for place in PLACES if place[5] == "PT"]
     with pytest.raises(SystemExit):
         measure(30, master, gazetteer, tmp_path / "work", 10, "test", places)
+
+
+def test_a_resume_measurement_that_matched_nothing_is_refused(tmp_path):
+    master = build_fixture_master(tmp_path / "master")
+    gazetteer = geo(tmp_path)
+    places = [place for place in PLACES if place[5] == "PT"]
+    with pytest.raises(SystemExit, match="matched no record"):
+        measure_resume(30, master, gazetteer, tmp_path / "work", 10, 1, places)
 
 
 def test_the_resume_measurement_reports_memory_and_the_data_it_measured(tmp_path):
@@ -115,3 +180,45 @@ def test_the_street_names_carry_no_place_evidence(tmp_path, monkeypatch):
     assert violations
     assert all(item["problem"] == "the street name adds a country"
                and item["countries"] == ["CN"] for item in violations)
+
+
+def test_input_cleanup_is_limited_to_owned_measurement_directories(tmp_path):
+    work = tmp_path / "benchmark-work"
+    work.mkdir()
+    caller_input = work / "input-30.csv"
+    caller_input.write_text("caller-owned", encoding="utf-8")
+    owned = work / "measure-30-owned"
+    owned.mkdir()
+    owned_input = owned / "input-30.csv"
+    owned_input.write_text("generated", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    outside_input = outside / "input-30.csv"
+    outside_input.write_text("outside", encoding="utf-8")
+
+    _cleanup_measurement_inputs(work, [
+        {"measurement_dir": owned.name, "rows": 30},
+        {"measurement_dir": "..", "rows": 30},
+    ])
+
+    assert not owned_input.exists()
+    assert caller_input.read_text(encoding="utf-8") == "caller-owned"
+    assert outside_input.read_text(encoding="utf-8") == "outside"
+
+
+def test_git_provenance_records_commit_dirty_state_and_status_hash():
+    provenance = git_provenance(ROOT)
+    assert len(provenance["git_commit"]) == 40
+    assert isinstance(provenance["git_dirty"], bool)
+    assert len(provenance["git_status_sha256"]) == 64
+
+
+def test_git_provenance_fails_closed_when_git_is_unavailable(monkeypatch):
+    class Failed:
+        returncode = 1
+        stdout = ""
+        stderr = "not a git repository"
+
+    monkeypatch.setattr("benchmark_batch.subprocess.run", lambda *args, **kwargs: Failed())
+    with pytest.raises(SystemExit, match="git provenance"):
+        git_provenance(ROOT)

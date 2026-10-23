@@ -19,11 +19,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
-import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -31,7 +32,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT / 'src') not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / 'src'))
 
-from world_address_engine.jobs.runner import resume_job, run_job  # noqa: E402
+from world_address_engine.jobs.checkpoint import file_sha256  # noqa: E402
+from world_address_engine.jobs.runner import (  # noqa: E402
+    RULES_VERSION, resume_job, run_job,
+)
 
 # Coherent synthetic places: the city and the country always belong
 # together, so a generated address is a plausible mailing address rather
@@ -244,6 +248,11 @@ def _child_environment() -> dict:
     return environment
 
 
+PATH_OPTIONS = frozenset({
+    'pack', 'catalogue', 'approval-manifest', 'approval-key', 'places-file',
+})
+
+
 def _run_in_child(kind: str, options: dict) -> dict:
     """Run one measurement in a fresh process and return its report.
 
@@ -252,17 +261,21 @@ def _run_in_child(kind: str, options: dict) -> dict:
     them, and only the first measurement would be attributable to the run
     it describes. Every measurement therefore gets a process of its own.
     """
-    work = Path(options['work'])
+    work = Path(options['work']).resolve()
     work.mkdir(parents=True, exist_ok=True)
-    report_path = work / f'child-{kind}-{os.getpid()}.json'
+    report_path = (work / f'child-{kind}-{os.getpid()}.json').resolve()
     command = [sys.executable, str(Path(__file__).resolve()),
-               f'--internal-{kind}', '--out', str(report_path)]
+               f'--internal-{kind}', '--out', str(report_path),
+               '--work-dir', str(work)]
     for key, value in options.items():
         if key in ('work', 'out'):
             continue
+        if key in PATH_OPTIONS:
+            value = Path(value).resolve()
         command.extend([f'--{key.replace("_", "-")}', str(value)])
-    result = subprocess.run(command, capture_output=True, text=True,
-                            env=_child_environment(), cwd=str(REPO_ROOT))
+    result = subprocess.run(
+        command, capture_output=True, text=True, encoding='utf-8',
+        errors='replace', env=_child_environment(), cwd=str(REPO_ROOT))
     if not report_path.is_file():
         raise SystemExit('the measurement process produced no report:\n'
                          + (result.stderr or result.stdout)[-4000:])
@@ -283,6 +296,27 @@ def _places_file(work: Path, places) -> Path:
     return path
 
 
+def _measurement_root(work: Path, kind: str, rows: int) -> Path:
+    """Create a unique owned directory without ever deleting caller data."""
+    work = Path(work).resolve()
+    work.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=f'{kind}-{rows}-', dir=work))
+
+
+def _cleanup_measurement_inputs(work: Path, results) -> None:
+    """Remove only generated inputs inside roots this tool created."""
+    work = Path(work).resolve()
+    for result in results:
+        name = result.get('measurement_dir')
+        rows = result.get('rows')
+        if not isinstance(name, str) or Path(name).name != name or not rows:
+            continue
+        root = (work / name).resolve()
+        if root.parent != work or not root.is_dir():
+            continue
+        (root / f'input-{int(rows)}.csv').unlink(missing_ok=True)
+
+
 def measure(rows: int, master, pack: Path, work: Path,
             batch_size: int, label: str, places=None) -> dict:
     """Run one full job in a fresh process and measure it.
@@ -291,7 +325,7 @@ def measure(rows: int, master, pack: Path, work: Path,
     the runner normally deletes, and its size is one of the numbers the
     benchmark has to report.
     """
-    work = Path(work)
+    root = _measurement_root(work, 'measure', rows)
     report = _run_in_child('measure', {
         'rows': rows,
         'pack': str(pack),
@@ -300,10 +334,11 @@ def measure(rows: int, master, pack: Path, work: Path,
         'approval-key': str(master.key_path),
         'batch-size': batch_size,
         'label': label,
-        'work': str(work),
-        'places-file': str(_places_file(work, places)),
+        'work': str(root),
+        'places-file': str(_places_file(root, places)),
     })
     _require_matched(report)
+    report['measurement_dir'] = root.name
     return report
 
 
@@ -313,8 +348,9 @@ def _measure_in_process(rows: int, master, pack: Path, work: Path,
     source = work / f'input-{rows}.csv'
     output = work / f'run-{rows}'
     if output.exists():
-        shutil.rmtree(output)
+        raise SystemExit(f'refusing to overwrite existing benchmark output: {output.name}')
     write_source(source, rows, places)
+    input_sha256 = file_sha256(source)
     started = time.perf_counter()
     counts = run_job(
         input_path=source,
@@ -347,7 +383,12 @@ def _measure_in_process(rows: int, master, pack: Path, work: Path,
         'export_bytes': tree_size(output) - checkpoint_bytes,
         'pack_bytes': Path(pack).stat().st_size,
         'catalogue_bytes': Path(master.db_path).stat().st_size,
-        'output_dir': str(output),
+        'pack_sha256': file_sha256(Path(pack)),
+        'catalogue_sha256': file_sha256(Path(master.db_path)),
+        'input_sha256': input_sha256,
+        'rules_version': RULES_VERSION,
+        'measurement_dir': work.name,
+        'output_dir': output.name,
     }
 
 
@@ -368,8 +409,8 @@ def _require_matched(report: dict) -> None:
 def measure_resume(rows: int, master, pack: Path, work: Path,
                    batch_size: int, pause_batches: int, places=None) -> dict:
     """Interrupt a job and resume it, measuring the restart cost."""
-    work = Path(work)
-    return _run_in_child('resume', {
+    root = _measurement_root(work, 'resume', rows)
+    report = _run_in_child('resume', {
         'rows': rows,
         'pack': str(pack),
         'catalogue': str(master.db_path),
@@ -377,9 +418,12 @@ def measure_resume(rows: int, master, pack: Path, work: Path,
         'approval-key': str(master.key_path),
         'batch-size': batch_size,
         'pause-batches': pause_batches,
-        'work': str(work),
-        'places-file': str(_places_file(work, places)),
+        'work': str(root),
+        'places-file': str(_places_file(root, places)),
     })
+    _require_matched(report)
+    report['measurement_dir'] = root.name
+    return report
 
 
 def _measure_resume_in_process(rows: int, master, pack: Path, work: Path,
@@ -389,9 +433,10 @@ def _measure_resume_in_process(rows: int, master, pack: Path, work: Path,
     source = work / f'input-{rows}.csv'
     output = work / f'resume-{rows}'
     if output.exists():
-        shutil.rmtree(output)
+        raise SystemExit(f'refusing to overwrite existing benchmark output: {output.name}')
     if not source.exists():
         write_source(source, rows, places)
+    input_sha256 = file_sha256(source)
     started = time.perf_counter()
     first = run_job(
         input_path=source, output_dir=output, geo_db=pack, hkp_db=master.db_path,
@@ -423,6 +468,12 @@ def _measure_resume_in_process(rows: int, master, pack: Path, work: Path,
         'peak_rss_scope': 'the interrupt and resume run, in one process',
         'pack_bytes': Path(pack).stat().st_size,
         'catalogue_bytes': Path(master.db_path).stat().st_size,
+        'pack_sha256': file_sha256(Path(pack)),
+        'catalogue_sha256': file_sha256(Path(master.db_path)),
+        'input_sha256': input_sha256,
+        'rules_version': RULES_VERSION,
+        'measurement_dir': work.name,
+        'output_dir': output.name,
     }
 
 
@@ -531,6 +582,49 @@ def _run_internal(args) -> int:
     return 0
 
 
+_CLI_PATH_ARGUMENTS = (
+    'pack', 'catalogue', 'approval_manifest', 'approval_key',
+    'work_dir', 'out', 'places_file',
+)
+
+
+def _resolve_cli_paths(args) -> None:
+    """Resolve once in the caller cwd; children intentionally use another cwd."""
+    for name in _CLI_PATH_ARGUMENTS:
+        value = getattr(args, name, None)
+        if value is not None:
+            setattr(args, name, Path(value).resolve())
+
+
+def git_provenance(repo_root: Path = REPO_ROOT) -> dict:
+    """Return exact commit and dirty-state provenance, or fail closed."""
+    def run(*arguments: str):
+        try:
+            return subprocess.run(
+                ['git', *arguments], cwd=Path(repo_root), capture_output=True,
+                text=True, encoding='utf-8', errors='replace', check=False,
+            )
+        except OSError as exc:
+            raise SystemExit(f'git provenance could not be obtained: {exc}') from exc
+
+    commit_result = run('rev-parse', '--verify', 'HEAD')
+    commit = (commit_result.stdout or '').strip().lower()
+    if commit_result.returncode != 0 or len(commit) != 40 or any(
+            character not in '0123456789abcdef' for character in commit):
+        detail = (commit_result.stderr or commit_result.stdout or '').strip()
+        raise SystemExit(f'git provenance could not be obtained: {detail or "invalid commit"}')
+    status_result = run('status', '--porcelain=v1', '--untracked-files=all')
+    if status_result.returncode != 0:
+        detail = (status_result.stderr or status_result.stdout or '').strip()
+        raise SystemExit(f'git provenance could not be obtained: {detail or "git status failed"}')
+    status = status_result.stdout or ''
+    return {
+        'git_commit': commit,
+        'git_dirty': bool(status.strip()),
+        'git_status_sha256': hashlib.sha256(status.encode('utf-8')).hexdigest(),
+    }
+
+
 class _Master:
     """A catalogue, the approval that governs it and where they live."""
 
@@ -575,6 +669,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument('--out', type=Path, default=None,
                         help='write the measurements to this JSON file')
     parser.add_argument('--keep-inputs', action='store_true')
+    parser.add_argument('--require-clean-git', action='store_true',
+                        help='refuse a release measurement taken from a dirty worktree')
     parser.add_argument('--internal-measure', action='store_true',
                         help=argparse.SUPPRESS)
     parser.add_argument('--internal-resume', action='store_true',
@@ -586,9 +682,14 @@ def main(argv: list[str] | None = None) -> int:
                         help='do not verify that the synthetic street names carry '
                              'no place evidence')
     args = parser.parse_args(argv)
+    _resolve_cli_paths(args)
 
     if args.internal_measure or args.internal_resume:
         return _run_internal(args)
+
+    provenance = git_provenance(REPO_ROOT)
+    if args.require_clean_git and provenance['git_dirty']:
+        raise SystemExit('release benchmark requires a clean git worktree')
 
     sizes = args.rows or [10_000]
     pack = args.pack
@@ -642,14 +743,22 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, indent=2), flush=True)
 
     payload = {
-        'pack': str(pack),
+        'pack': Path(pack).name,
         'pack_bytes': Path(pack).stat().st_size,
-        'catalogue': str(master.db_path),
+        'pack_sha256': file_sha256(Path(pack)),
+        'catalogue': Path(master.db_path).name,
         'catalogue_bytes': Path(master.db_path).stat().st_size,
-        'approval_manifest': str(master.manifest_path),
+        'catalogue_sha256': file_sha256(Path(master.db_path)),
+        'approval_manifest': Path(master.manifest_path).name,
+        'approval_manifest_sha256': file_sha256(Path(master.manifest_path)),
         'approval_scope': master.approval.scope,
         'places': len(places),
+        'places_sha256': hashlib.sha256(
+            json.dumps(places, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+        ).hexdigest(),
         'places_excluded': dropped,
+        'rules_version': RULES_VERSION,
+        **provenance,
         'python': sys.version,
         'platform': sys.platform,
         'results': results,
@@ -659,10 +768,7 @@ def main(argv: list[str] | None = None) -> int:
         args.out.write_text(json.dumps(payload, indent=2), encoding='utf-8')
         print(f'wrote {args.out}')
     if not args.keep_inputs:
-        for rows in sizes:
-            stale = work / f'input-{rows}.csv'
-            if stale.exists():
-                stale.unlink()
+        _cleanup_measurement_inputs(work, results)
     return 0
 
 
