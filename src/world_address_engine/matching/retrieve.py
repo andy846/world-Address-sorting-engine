@@ -187,6 +187,40 @@ def _is_han_term(term: str) -> bool:
     return any("\u3400" <= char <= "\u9fff" for char in term)
 
 
+def _embeds_name(longer: str, shorter: str) -> bool:
+    """True when ``shorter`` appears inside ``longer`` as a whole name."""
+    if len(shorter) >= len(longer):
+        return False
+    if _is_han_term(longer) and _is_han_term(shorter):
+        return shorter in longer
+    long_words = longer.split(' ')
+    short_words = shorter.split(' ')
+    if len(short_words) >= len(long_words):
+        return False
+    return any(long_words[start:start + len(short_words)] == short_words
+               for start in range(len(long_words) - len(short_words) + 1))
+
+
+def _preferred_canonical(canonicals) -> str:
+    """Choose the canonical name that owns a place.
+
+    Han search terms are generated as n-grams of the address, so a Han name
+    that merely concatenates other names of the same place is an artefact of
+    the generator, not a name of its own: "中国上海" is Shanghai under a
+    redundant country prefix. The city keeps its own name and the country
+    name stays available as separate evidence. A Latin name is written out
+    in the address and always owns the place.
+    """
+    ordered = sorted(canonicals, key=lambda canonical: (-len(canonical), canonical))
+    for canonical in ordered:
+        if not _is_han_term(canonical):
+            return canonical
+        if not any(other != canonical and _embeds_name(canonical, other)
+                   for other in canonicals):
+            return canonical
+    return ordered[0]
+
+
 def _han_suffix_keys(term: str) -> list[str]:
     """The gazetteer spellings of a Han name that carries an admin suffix."""
     if len(term) < 2 or not _is_han_term(term):
@@ -398,6 +432,7 @@ def _suppress_nested_terms(buckets, address_forms, *, retain_unlocatable=False):
             entity_countries[term].add(_country)
     if not weights:
         return buckets
+
     segments = tuple(segment for form in address_forms for segment in _bounded_segments(form))
     spans: dict[str, list[tuple[int, int, int]]] = {}
     occurrence_count = 0
@@ -473,6 +508,8 @@ def retrieve_candidates(geo_db: Path, address_forms: tuple[str, ...],
     place_rows: dict[int, tuple[float, str, str, str, str]] = {}
     # place_id -> longest canonical term that matched it
     place_terms: dict[int, str] = {}
+    # place_id -> every canonical term that matched it
+    place_canonicals: dict[int, set[str]] = {}
     # every canonical term that produced evidence
     matched_canonicals: set[str] = set()
 
@@ -502,6 +539,7 @@ def retrieve_candidates(geo_db: Path, address_forms: tuple[str, ...],
                     known = place_terms.get(place_id)
                     if known is None or len(canonical) > len(known):
                         place_terms[place_id] = canonical
+                    place_canonicals.setdefault(place_id, set()).add(canonical)
 
         run_query(list(key_owner))
 
@@ -518,6 +556,12 @@ def retrieve_candidates(geo_db: Path, address_forms: tuple[str, ...],
         if suffix_keys:
             key_owner.update(suffix_keys)
             run_query(list(suffix_keys))
+
+    # A generated name that concatenates other names of the same place does
+    # not own that place, so the city keeps its own name and the country name
+    # stays available as separate evidence.
+    for place_id, canonicals in place_canonicals.items():
+        place_terms[place_id] = _preferred_canonical(canonicals)
 
     # (canonical term, country) -> (weight, place_id)
     buckets: dict[tuple[str, str], tuple[float, int]] = {}

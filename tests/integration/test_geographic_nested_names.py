@@ -194,6 +194,34 @@ def test_han_country_and_recognized_city_form_an_address_chain(text, pack, maste
     assert (result.status, result.hkp_code) == ('MATCHED', 'CN')
 
 
+@pytest.mark.parametrize('text', ['中国上海', '中国北京', '北京中国', '上海中国'])
+def test_han_country_and_city_are_matched_in_either_order(text, pack, master):
+    """A combined Han alias must not hide the country and city it contains."""
+    result = classify(rec(text), pack, master)
+    assert (result.status, result.hkp_code) == ('MATCHED', 'CN')
+
+
+@pytest.mark.parametrize('text', [
+    'China Mobile', 'Mobile China', 'China Southern', 'China Eastern',
+])
+def test_real_pack_never_asserts_a_country_from_brand_text(text, pack, master):
+    """A country name that modifies a foreign place is a brand, not a destination."""
+    result = classify(rec(text), pack, master)
+    assert result.status != 'MATCHED'
+    assert result.hkp_code is None
+
+
+@pytest.mark.parametrize('text', [
+    'Bearna Ireland', 'Castlerea Ireland', 'Tobercurry Ireland',
+    'Bunclody Ireland', 'Bundoran Ireland',
+])
+def test_real_pack_matches_a_small_town_and_its_country_without_punctuation(
+        text, pack, master):
+    """A small locality and its own country are an address chain without a comma."""
+    result = classify(rec(text), pack, master)
+    assert (result.status, result.hkp_code) == ('MATCHED', 'IE')
+
+
 @pytest.mark.parametrize('name', ['United States of America', 'Republic of India'])
 @pytest.mark.parametrize('company', ['', ' Ltd'])
 def test_longer_country_names_keep_explicit_and_withdrawn_conflicts(
