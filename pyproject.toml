@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "world-address-sorting-engine"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Fully offline, Hongkong Post destination address classifier"
 requires-python = ">=3.12"
 dependencies = []
@@ -21,6 +21,9 @@ test = ["pytest>=8,<10"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"world_address_engine.resources" = ["*.json"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
