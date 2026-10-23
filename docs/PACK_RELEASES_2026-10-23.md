@@ -79,8 +79,19 @@ refuses them because their punctuation-bearing keys differ from its reader.
 
 These are geographic reference packs. The verified Hongkong Post destination
 master remains unavailable; fixture codes do not authorize production use.
-Known nested-name classification defects, completed 100k/1M/5M measurements,
-and usable Windows packaged/offline acceptance remain separate gates. A
-real Windows onefile build was attempted and its self-test correctly
-reported a QtCore DLL import failure; no successful packaged-startup claim
-is made here.
+Nested-name classification fixes have since passed independent review and
+real-pack regressions. A completed 100k synthetic pipeline measurement is
+109.7 records/sec, with 56.8 MiB peak RSS; see `docs/benchmarks.md`.
+
+The QtCore DLL failure was fixed by isolating inherited native DLL search
+paths. The local alpha.1 Windows onefile executable is 48,488,511 bytes
+(46.24 MiB), SHA-256
+`620e25283117bbfe6ea590a66231fcf39d0c5777aeb31fcb2092d7ccdeda6c31`.
+Its packaged self-test passed frozen/version attestation, GUI events,
+9,604-row synthetic CSV and one-row XLSX preview, and production-approval
+refusal. This local build is distinct from the executable subsequently
+built by the release workflow, whose hash and size must be checked separately.
+
+The k2 Simplified Chinese Hong Kong SAR alias gap, 1M/5M measurements,
+official HKP master and clean offline Windows operator acceptance remain
+open. Data-pack preservation does not satisfy those application gates.

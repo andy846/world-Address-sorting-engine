@@ -4,8 +4,10 @@ A Python, **offline-first**, high-volume address classifier under development. T
 
 ## Current development status (October 2026)
 
-- Completed prototype modules: typed contracts, HKP code catalogue validation, compact/extended local GeoNames builder, offline pack integrity checks, trilingual normalization, candidate retrieval, conservative classification rules, streaming CSV/TXT/XLSX readers, spreadsheet-safe reports, and privacy-safe input preview.
-- **Not production ready:** No fully audited Hongkong Post destination master has been imported; full real-world GeoNames data has not been built; geographical scoring and country aliases still require extensive calibration; integrated job runner, checkpoint/resume, Windows GUI, and packaged Windows acceptance remain incomplete.
+- Implemented developer-preview modules: typed contracts, signed HKP catalogue approval checks, real Compact/Extended GeoNames packs, trilingual retrieval, conservative classification, streaming CSV/TXT/XLSX input, reconciled exports, checkpoint/resume, and a PySide6 Windows GUI with audited manual review.
+- Both worldwide packs are preserved in [versioned data releases](docs/PACK_RELEASES_2026-10-23.md), verified and installable offline. Current k2 SQLite sizes are 142,577,664 bytes (Compact) and 1,087,344,640 bytes (Extended).
+- Windows onefile build and packaged self-test passed locally. The measured 100,000-row synthetic pipeline processed 109.7 records/sec with 56.8 MiB peak RSS; [measurement scope and provenance](docs/benchmarks.md) matter.
+- **Not production ready:** The official Hongkong Post destination master remains unverified; 1M/5M benchmarks and clean offline Windows operator acceptance are outstanding. Classification is restricted to acknowledged test use. A Simplified Chinese Hong Kong SAR alias gap remains in k2.
 - Test examples use synthetic fixtures. No actual recipient address file is committed to this repository.
 
 ## Preview a production address file (no database needed)
@@ -58,7 +60,19 @@ Outputs are Classified_Addresses.csv, Manual_Review.csv, Country_Summary.csv and
 
 **Privacy:** The .job-state folder stores plaintext recipient address rows as local JSONL checkpoints. Limit filesystem access, delete according to retention policy, and never upload this folder or actual customer CSV files to GitHub. SHA256 validation detects modified source files, data packs and checkpoint batches.
 
-**Status:** Not production ready — no fully reviewed HKP code master, full real GeoNames data packs, calibrated geographic scoring, Windows GUI or independent review. The new CLI workflow is for synthetic fixtures only.
+**Status:** Use synthetic fixtures until the official HKP master and documented acceptance gates pass. Independent classification and packaging reviews have been performed; they do not establish postal production accuracy.
+
+## Windows GUI developer preview
+
+```powershell
+python -m pip install -e ".[excel,gui]"
+world-address-engine-gui
+```
+
+The GUI supports input mapping, pack selection, progress, cancellation/resume,
+and audited manual review. Protect local checkpoints and review logs. Packaged
+startup and synthetic previews have been tested; clean offline operator
+acceptance remains outstanding. See [alpha.1 release notes](docs/releases/v0.1.0-alpha.1.md).
 
 
 ## Official worldwide GeoNames SQLite build
@@ -74,4 +88,6 @@ python tools/build_reference_pack.py --source-dir "data/geonames-source" --outpu
 
 The output is two SQLite files and `build_report.json` reporting **actual byte sizes** and record counts, source hashes, integrity checks and archive sizes. Downloading is only a build-time operation; classification is offline.
 
-See [official build guide](docs/GEONAMES_DB_BUILD.md) and [GitHub Actions workflow](.github/workflows/build-geonames.yml). **No global SQLite capacity is claimed until a real full-data run succeeds.** Test fixtures are not the real global database.
+The full official-source build succeeded in Actions run `39827512415` and its
+original databases were preserved alongside the current k2 rebuild. See the
+[build guide](docs/GEONAMES_DB_BUILD.md), [preserved releases and offline installation](docs/PACK_RELEASES_2026-10-23.md), and [measured sizes](docs/benchmarks.md).

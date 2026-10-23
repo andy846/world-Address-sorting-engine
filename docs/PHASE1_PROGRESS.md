@@ -242,3 +242,58 @@ Rule-version pinning and benchmark child-work-directory isolation are also
 under local validation. Full 100k/1M/5M measurements, approved Hongkong Post
 master, onedir runtime and clean offline operator acceptance remain open.
 
+## 2026-10-23 - alpha.1 release validation
+
+The preserved k2 data packs remain unchanged: Compact 142,577,664 bytes
+(135.973 MiB), Extended 1,087,344,640 bytes (1,036.973 MiB). Their separate
+release and offline download/install evidence are in `docs/PACK_RELEASES_2026-10-23.md`.
+
+Since `1d042bb`, commits `d86d571`, `c2fc5fb` and `82325a0` harden checkpoint
+verification, cleanup, benchmark ownership and provenance. `4a67073`,
+`92c8eb1` and `ec5301c` fix nested names, brand collisions and conflicting
+Han geography. `076cc2b` pins exact status, reason and empty-code outcomes.
+Independent classifier re-review found no P0/P1/P2 findings in that scope;
+its full suite passed 684 tests, with 1 skipped and 2 expected failures.
+
+The clean `ec5301c` benchmark completed 2,000 and 100,000 synthetic rows at
+107.2 and 109.7 records/sec, with 47.8 and 56.8 MiB peak RSS. The 100k run
+took 911.675 seconds, reconciled all rows, and used 62,057,316 checkpoint
+bytes. A second run with changing Git provenance was rejected and excluded.
+Full methodology and sizes are in `docs/benchmarks.md`; 1M/5M are unmeasured.
+
+`b32a0bb` attests the running bundle version. A local Windows onefile build
+of version `0.1.0a1` is 48,488,511 bytes and passed packaged frozen/version,
+GUI event, CSV/XLSX preview and production-approval refusal checks.
+
+Release review found concrete workflow defects: draft lookup through the
+published-tag endpoint, upload verification against an unanchored checksum
+file, short branch-name checks, and incomplete failure cleanup. Follow-up
+tests were observed RED (5 failures/5 passes), then GREEN (12 release tests,
+including metadata). The workflow now creates and records a draft ID before
+upload, checks full branch refs, compares downloaded checksum files with the
+pre-upload copy, and returns failed/cancelled publications to draft by ID.
+Alpha.0's commit, asset names, sizes and known digests are checked before
+publication. Final local regression with both real k2 packs and slow checks:
+**694 passed, 1 skipped, 2 xfailed in 115.52 seconds**. Syntax compilation,
+all 22 Linux Bash workflow blocks, all 5 embedded Python blocks, and
+`git diff --check` passed. Actual GitHub build/publication evidence must be
+recorded after the run finishes.
+
+Ruling: the branch push marker is deliberate publication intent from an
+already authorized repository writer, not an independent approval boundary.
+Repository-wide immutability and required reviewers are not prerequisites
+specified for this TEST ONLY preview; no such platform protection is claimed.
+Existing release versions are refused rather than overwritten. If the API
+is unavailable during cleanup, manual draft recovery may still be needed.
+
+Ruling: maliciously renamed or nested databases are not comprehensively
+detected by header/extension scans. The build additionally inspects the
+PyInstaller archive and runtime tree, and only the verified wheel, EXE and
+checksum file are uploaded. This is not a content scanner for arbitrary
+customer data and relies on the reviewed source/build inputs.
+
+Production remains NO-GO: the official Hongkong Post master is unverified;
+the k2 Simplified Chinese Hong Kong SAR alias is missing (two expected-failure
+regressions); 1M/5M benchmarks, onedir runtime and clean offline operator
+acceptance are outstanding. Alpha.1 is a TEST ONLY prerelease.
+

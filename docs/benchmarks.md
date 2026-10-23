@@ -103,9 +103,14 @@ synthetic 36-country fixture, not the verified Hongkong Post master, so a
 country the real master covers would move from review to a code. The
 figures measure only these fixtures: no wrong code was asserted within
 those 129 rows. Independent review found additional cases outside this
-set: `Northern Ireland` can resolve incorrectly to `IE`, and
-`Papua New Guinea, Guinea` can lose its explicit-country conflict. Those
-remain accuracy blockers and require regression fixes before release.
+set: `Northern Ireland` could resolve incorrectly to `IE`, and
+`Papua New Guinea, Guinea` could lose its explicit-country conflict. Those
+cases were subsequently fixed and pinned in real-pack regressions. The table
+above is the earlier golden-set measurement, not a new accuracy claim for
+rules `2026-10-23.5`. The k2 packs still lack the Simplified Chinese alias
+`香港特别行政区`; the full phrase `中华人民共和国香港特别行政区` currently
+resolves incorrectly to CN. Two expected-failure regressions document this
+pack gap, one per profile. A future pack rebuild must address it.
 
 ## Source archives (pinned)
 
@@ -190,16 +195,16 @@ them.
 
 ## Still unmeasured
 
-- Completed end-to-end classification throughput at 100k, 1M and 5M rows.
-  The preliminary 100k run was interrupted before completion; no result
-  is reported or extrapolated for any of these volumes.
+- Completed end-to-end classification throughput at 1M and 5M rows.
+  A valid completed 100k measurement is recorded below; larger volumes
+  have not been measured and are not extrapolated.
 - Lookup latency with the page cache cold (the figures above are warm).
 - A measured `ALL_LANG_ALIAS` baseline for size comparison. **No size
   reduction percentage is claimed**, because the baseline was never built.
 - Postal accuracy against the real Hongkong Post master, which does not
   exist yet.
 
-## End-to-end pipeline throughput — preliminary smoke measurement
+## End-to-end pipeline throughput - completed 100k measurement
 
 `tools/benchmark_batch.py` runs the **whole** pipeline — CSV reader,
 classification, checkpoint writer, exporter — over a synthetic file
@@ -207,19 +212,27 @@ against a real installed pack, and reports only what that run measured.
 The synthetic places are the ones the catalogue in use actually issues,
 so a row that the master cannot answer is not counted as a matched row.
 
-Measured with commit `adafeed` against the real k2 Extended pack and a
-synthetic fixture catalogue. This 2,000-row smoke run is too small to
-establish high-volume performance or production postal accuracy.
+Measured with clean commit `ec5301c4addaa605deac3ca01b9e8ff3d215bb5c`, rules
+`2026-10-23.5`, Windows / Python 3.13.2, against the real k2 Extended pack
+and a signed synthetic fixture catalogue. Later test/documentation/release
+workflow changes do not modify the measured classifier. The result JSON
+records `git_dirty: false`, source fingerprints, per-process RSS, input hashes,
+and exact status reconciliation. This is synthetic pipeline performance,
+not production postal accuracy.
 
-| Rows | Records/sec | Peak RSS bytes | Checkpoint bytes | MATCHED | REVIEW_AMBIGUOUS |
-|---:|---:|---:|---:|---:|---:|
-| 2,000 | 274.5 | 48,558,080 | 1,182,359 | 1,928 | 72 |
+| Rows | Seconds | Records/sec | Peak RSS bytes | Checkpoint bytes | Export bytes | MATCHED | REVIEW_AMBIGUOUS |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 2,000 | 18.651 | 107.2 | 50,139,136 | 1,228,565 | 515,426 | 1,928 | 72 |
+| 100,000 | 911.675 | 109.7 | 59,535,360 | 62,057,316 | 25,944,558 | 96,364 | 3,636 |
 
 Pack: 1,087,344,640 bytes; fixture catalogue: 45,056 bytes. Each measurement
 runs in a fresh process to attribute peak memory to that run. Street names
 were checked against all 55 fixture places and carry no additional country
-evidence. The 100k/1M/5M runs remain outstanding, as do cold-cache and
-clean-machine measurements. Any classifier change requires new results.
+evidence. Peak RSS is 47.8 / 56.8 MiB respectively; the 100k checkpoint is
+59.18 MiB and contains plaintext synthetic rows. The 1M/5M runs, cold-cache
+and clean-machine measurements remain outstanding. Any classifier change
+requires new results. A second run with changing Git provenance was rejected
+by the benchmark and is excluded from these figures.
 
 ### How to reproduce
 
