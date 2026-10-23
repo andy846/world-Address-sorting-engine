@@ -12,7 +12,7 @@ from world_address_engine.matching.normalize import normalize_address, normalize
 from world_address_engine.matching.retrieve import retrieve_candidates, OccurrenceLimitExceeded
 from world_address_engine.models import AddressRecord
 
-COUNTRY_RULES_VERSION = '2026-10-24.country.2'
+COUNTRY_RULES_VERSION = '2026-10-24.country.3'
 RIVAL_RATIO = 0.55
 MAX_ADDRESS_CHARS = 10_000
 
@@ -108,6 +108,7 @@ _COMPANY = re.compile(
 _ADDRESS = re.compile(r'\d|\b(?:road|street|avenue|lane|flat|floor|block|room)\b|[路街巷弄號号樓楼]', re.I)
 _RECIPIENT = re.compile(r'^(?:mr|mrs|ms|miss|dr|prof|attn|attention)\.?\s|^(?:收件人|聯絡人|联系人)', re.I)
 _STREET_AFTER = re.compile(r'^\s*(?:street|st|road|rd|avenue|ave|lane|ln|drive|dr|boulevard|blvd)\b|^[街路巷弄]', re.I)
+_STREET_TERM = re.compile(r'\b(?:street|st|road|rd|avenue|ave|lane|ln|drive|dr|boulevard|blvd)$|[街路巷弄]$', re.I)
 _STREET_ADDRESS = re.compile(
     r'^\s*\d+[a-z]?\s+.+\b(?:street|st|road|rd|avenue|ave|lane|ln|drive|dr|boulevard|blvd)\b', re.I)
 _BUILDING_AFTER = re.compile(
@@ -427,7 +428,7 @@ class CountryClassifier:
         for candidate in candidates:
             for term, _weight, _place_id in candidate.place_support:
                 if term not in roles:
-                    roles[term] = any(
+                    roles[term] = not _STREET_TERM.search(term) and any(
                         not (_STREET_AFTER.match(line[match.end():]) or
                              _BUILDING_AFTER.match(line[match.end():]))
                         for form in forms for line in form.splitlines()

@@ -104,6 +104,20 @@ def test_street_role_does_not_cross_address_line_boundaries(tmp_path):
     assert found.country_code == 'GB'
 
 
+def test_street_named_as_an_entire_gazetteer_district_is_not_a_destination(tmp_path):
+    pack = geo(tmp_path, extra_rows=[_row(950, 'London Road', 'LC', 'A', 'ADM2')])
+    with CountryClassifier(pack) as classifier:
+        found = classifier.classify(record('Example Person\n12 London Road\nTokyo'))
+    assert found.country_code == 'JP'
+
+
+def test_non_street_name_is_not_rejected_just_because_it_contains_road(tmp_path):
+    pack = geo(tmp_path, extra_rows=[_row(950, 'Abbey Road Town', 'FR', 'P', 'PPLC', pop=500000)])
+    with CountryClassifier(pack, catalogue()) as classifier:
+        found = classifier.classify(record('Example Person\n12 Example Road\nAbbey Road Town'))
+    assert found.country_code == 'FR'
+
+
 def test_tiny_places_cannot_amplify_an_administrative_rival(tmp_path):
     extra = [_row(901, 'Alpha District', 'FR', 'A', 'ADM2')]
     extra += [_row(902 + i, name, 'FR', pop=250)
