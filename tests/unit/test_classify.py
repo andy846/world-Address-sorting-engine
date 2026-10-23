@@ -140,7 +140,12 @@ def test_han_company_name_is_not_country_evidence(tmp_path):
 
 
 def test_han_country_statement_is_matched(tmp_path):
-    result = classify(rec('中国北京市朝阳区建国路88号'), geo(tmp_path), hkp(tmp_path))
+    db = geo(tmp_path, extra_rows=[
+        _row(21, '北京市', 'CN', 'A', 'ADM1', '11', 21540000),
+        _row(22, '朝阳区', 'CN', 'A', 'ADM2', '11', 3450000),
+        _row(23, '建国', 'CN', pop=100000),
+    ])
+    result = classify(rec('中国北京市朝阳区建国路88号'), db, hkp(tmp_path))
     assert result.status == 'MATCHED' and result.hkp_code == 'CN'
 
 

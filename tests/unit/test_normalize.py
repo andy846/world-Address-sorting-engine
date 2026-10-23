@@ -22,6 +22,17 @@ def test_russian_script_is_not_silently_accepted():
     assert not has_unsupported_script('台北市, Taiwan')
 
 
+def test_combining_marks_and_format_controls_are_not_silently_skipped():
+    assert has_unsupported_script('India\u064e')
+    assert has_unsupported_script('India\u0902')
+    assert has_unsupported_script('India\u200d')
+
+
+def test_nfkc_latin_is_accepted_before_script_validation():
+    assert not has_unsupported_script('\uff29\uff4e\uff44\uff49\uff41')
+    assert not has_unsupported_script('\U0001d43c\U0001d45b\U0001d451\U0001d456\U0001d44e')
+
+
 def test_in_substring_does_not_match_india_country_code():
     assert not contains_name('International Limited', 'IN')
     assert contains_name('Main Street, India', 'India')

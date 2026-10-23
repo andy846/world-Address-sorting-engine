@@ -1,6 +1,8 @@
 import contextlib
 import time
 
+import pytest
+
 from pathlib import Path
 from world_address_engine.data.geonames_builder import build_geonames_pack
 from world_address_engine.matching import retrieve as retrieve_module
@@ -278,3 +280,69 @@ def test_the_suffix_fallback_is_not_used_for_a_plain_latin_name(tmp_path):
     found = retrieve_candidates(geo(tmp_path, extra_rows=rows),
                                 normalize_address('Springfield'), None)
     assert {c.destination_id for c in found} == {'US', 'CA'}
+
+
+@pytest.mark.parametrize('text,short_pop,retained', [
+    ('聖保羅', 100000, False),
+    ('聖保羅, 保羅', 100000, True),
+    ('保羅, 聖保羅', 100000, True),
+    # A high population does not make a nested fragment independent.
+    ('聖保羅', 1000000, False),
+    ('聖保羅, 保羅市', 100000, True),
+])
+def test_han_fragments_require_an_independent_occurrence(
+        tmp_path, text, short_pop, retained):
+    db = geo(tmp_path, extra_rows=[
+        _row(100, 'Sao Paulo', 'BR', pop=100000),
+        _row(101, 'Paul', 'US', pop=short_pop),
+    ], extra_aliases=['100\t100\tzh\t聖保羅\n', '101\t101\tzh\t保羅\n'])
+    found = _by_code(retrieve_candidates(db, normalize_address(text)))
+    assert 'BR' in found
+    assert ('US' in found) is retained
+
+
+def test_nested_han_alias_does_not_count_as_corroboration(tmp_path):
+    db = geo(tmp_path, extra_rows=[
+        _row(100, 'Sao Paulo', 'BR', pop=1000000),
+        _row(101, 'Paul', 'BR', pop=100000),
+    ], extra_aliases=['100\t100\tzh\t聖保羅\n', '101\t101\tzh\t保羅\n'])
+    found = _by_code(retrieve_candidates(db, normalize_address('聖保羅')))
+    assert found['BR'].token_count == 1
+
+
+@pytest.mark.parametrize('phrase,fragment', [
+    ('New Brunswick', 'Brunswick'), ('North Haven', 'Haven'),
+])
+@pytest.mark.parametrize('independent', [False, True])
+def test_latin_phrase_fragments_only_contribute_at_independent_occurrences(
+        tmp_path, phrase, fragment, independent):
+    db = geo(tmp_path, extra_rows=[
+        _row(100, phrase, 'CA', 'A', 'ADM1', '04', 800000),
+        _row(101, phrase, 'US', pop=55000),
+        _row(102, fragment, 'US', pop=45000),
+    ])
+    text = phrase + (', ' + fragment if independent else '')
+    found = _by_code(retrieve_candidates(db, normalize_address(text)))
+    assert found['US'].token_count == (2 if independent else 1)
+    assert found['CA'].token_count == 1
+
+
+def test_han_admin_suffix_does_not_suppress_a_cross_country_short_name(tmp_path):
+    """廣州市 matching a Korean row must not erase the Chinese 廣州 place."""
+    db = geo(tmp_path, extra_rows=[
+        _row(100, 'Guangzhou', 'CN', pop=18676605),
+        _row(101, 'Gwangju', 'KR', pop=1000),
+    ], extra_aliases=[
+        '100\t100\tzh-Hant\t廣州\n',
+        '101\t101\tzh-Hant\t廣州市\n',
+    ])
+    found = _by_code(retrieve_candidates(db, normalize_address('廣州市')))
+    assert found['CN'].support > found['KR'].support
+
+
+@pytest.mark.parametrize('suffix', ['\u064e', '\u0902', '\u200d', '\U0001f600'])
+def test_marks_formats_and_symbols_do_not_create_latin_name_boundaries(
+        tmp_path, suffix):
+    text = 'India' + suffix
+    found = _by_code(retrieve_candidates(geo(tmp_path), normalize_address(text)))
+    assert 'IN' not in found

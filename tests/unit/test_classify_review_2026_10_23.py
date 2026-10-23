@@ -24,6 +24,7 @@ COUNTRIES = [
     ('united-states', 'US', 'US', 'United States', '美國', '美国'),
     ('japan', 'JP', 'JP', 'Japan', '日本', '日本'),
     ('china', 'CN', 'CN', 'China', '中國', '中国'),
+    ('georgia', 'GE', 'GE', 'Georgia', '喬治亞', '格鲁吉亚'),
     ('hong-kong', 'HK', 'HK', 'Hong Kong', '香港', '香港'),
     ('india', 'IN', 'IN', 'India', '印度', '印度'),
     ('singapore', 'SG', 'SG', 'Singapore', '新加坡', '新加坡'),
@@ -64,10 +65,12 @@ def geo(tmp_path_factory):
         _row(19, 'United States Minor Outlying Islands', 'UM', 'A', 'PCLI', '00', 300),
         _row(20, 'Wake', 'UM', 'P', 'PPL', '01', 1000),
         _row(21, 'Wake', 'US', 'P', 'PPL', 'NC', 100000),
+        _row(22, 'State of China', 'CN', pop='1000'),
     ]
     (source / 'allCountries.txt').write_text('\n'.join(rows) + '\n', encoding='utf8')
     (source / 'alternateNamesV2.txt').write_text(
-        '1\t2\ten\tCo-operative Republic of Guyana\n', encoding='utf8')
+        '1\t2\ten\tCo-operative Republic of Guyana\n'
+        '2\t4\ten\tState of Georgia\n', encoding='utf8')
     path = directory / 'geo.db'
     build_geonames_pack(source, path, 'EXTENDED_GLOBAL')
     return path
@@ -134,6 +137,77 @@ def test_territory_inside_its_parent_country_is_matched(geo, master):
 def test_country_word_inside_a_company_name_is_not_evidence(text, code, geo, master):
     result = classify(text, geo, master)
     assert result.hkp_code != code
+
+
+@pytest.mark.parametrize("text,code", [
+    ('Air China', 'CN'),
+    ('Air India', 'IN'),
+    ('Made in China', 'CN'),
+    ('Huawei China', 'CN'),
+    ('Samsung India', 'IN'),
+    ('Designed in China', 'CN'),
+    ('Apple China', 'CN'),
+])
+def test_country_word_after_a_company_or_brand_word_is_not_evidence(
+        text, code, geo, master):
+    result = classify(text, geo, master)
+    assert result.status != 'MATCHED'
+    assert result.hkp_code is None
+
+
+# --- review P2-2: mixed scripts must not create a geographic token boundary
+
+@pytest.mark.parametrize('text,code', [
+    ('India香港', 'IN'),
+    ('香港India', 'IN'),
+])
+def test_han_text_adjacent_to_a_latin_country_name_is_not_a_word_boundary(
+        text, code, geo, master):
+    result = classify(text, geo, master)
+    assert result.hkp_code != code
+
+
+@pytest.mark.parametrize('text', [
+    'Indiaთ', 'IndiaМосква', 'Indiaالعربية',
+    'India\u064e',   # ARABIC FATHA
+    'India\u0902',   # DEVANAGARI SIGN ANUSVARA
+    'India\u200d',   # ZERO WIDTH JOINER
+])
+def test_unsupported_adjacent_scripts_are_rejected(text, geo, master):
+    result = classify(text, geo, master)
+    assert result.status == 'UNKNOWN'
+    assert result.reason == 'UNSUPPORTED_LANGUAGE'
+    assert result.hkp_code is None
+
+
+@pytest.mark.parametrize('text', [
+    '\uff29\uff4e\uff44\uff49\uff41',  # Fullwidth Latin "India".
+    '\U0001d43c\U0001d45b\U0001d451\U0001d456\U0001d44e',
+])
+def test_compatibility_latin_is_normalized_before_script_validation(
+        text, geo, master):
+    result = classify(text, geo, master)
+    assert (result.status, result.hkp_code) == ('MATCHED', 'IN')
+
+
+def test_state_alias_for_a_us_admin_area_does_not_assert_georgia_country(
+        geo, master):
+    result = classify('State of Georgia', geo, master)
+    assert result.hkp_code != 'GE'
+    assert result.status != 'MATCHED' or result.hkp_code == 'US'
+
+
+def test_state_alias_and_explicit_parent_country_resolve_to_the_parent(
+        geo, master):
+    result = classify('State of Georgia, United States', geo, master)
+    assert (result.status, result.hkp_code) == ('MATCHED', 'US')
+
+
+def test_state_syntax_does_not_turn_a_local_place_into_a_country_entity(
+        geo, master):
+    result = classify('State of China', geo, master)
+    assert result.status != 'MATCHED'
+    assert result.hkp_code is None
 
 
 # --- review P1-4: the MATCHED bar must sit above a single insignificant place

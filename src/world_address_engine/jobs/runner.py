@@ -33,7 +33,7 @@ def _load_approval(manifest_path: Path | None, key_path: Path | None,
 # Bumped whenever the classification or reporting rules change. It is
 # recorded in every export so a result can be traced to the rules that
 # produced it.
-RULES_VERSION = '2026-10-23.4'
+RULES_VERSION = '2026-10-23.5'
 
 # How often the cancel flag is read while a batch is still filling. A cancel
 # must never be ignored because the job is smaller than one batch.

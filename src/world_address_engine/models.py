@@ -40,6 +40,9 @@ class DestinationCandidate:
     token_count: int = 0
     country_entity: bool = False
     entity_terms: tuple[str, ...] = ()
+    # The GeoNames feature code behind each entity term. This distinguishes a
+    # sovereign country (PCLI) from a semi-independent territory (PCLS).
+    entity_feature_codes: tuple[tuple[str, str], ...] = ()
     # Per-term evidence mass: (search term, weight) pairs, heaviest first.
     # The classifier needs the breakdown to withdraw evidence that turns out
     # to belong to a company name rather than to a destination.

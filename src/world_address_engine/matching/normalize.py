@@ -70,10 +70,25 @@ def normalize_address(value: str) -> tuple[str, ...]:
 
 
 def has_unsupported_script(value: str) -> bool:
+    """Reject unsupported writing systems without skipping their marks.
+
+    NFKC runs first so compatibility forms of supported Latin text are not
+    rejected. Combining marks and format controls are rejected after that
+    step: a mark must never become an invisible word boundary.
+    """
+    value = unicodedata.normalize('NFKC', value)
     for char in value:
-        name = unicodedata.name(char, '')
-        if name.startswith(('CYRILLIC', 'ARABIC', 'HEBREW', 'HIRAGANA', 'KATAKANA', 'HANGUL', 'THAI', 'DEVANAGARI', 'GREEK')):
+        category = unicodedata.category(char)
+        if category.startswith('M') or category == 'Cf':
             return True
+        if not char.isalpha():
+            continue
+        name = unicodedata.name(char, '')
+        if name.startswith('LATIN'):
+            continue
+        if name.startswith(('CJK UNIFIED IDEOGRAPH', 'CJK COMPATIBILITY IDEOGRAPH')):
+            continue
+        return True
     return False
 
 

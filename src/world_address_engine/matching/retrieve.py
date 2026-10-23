@@ -17,6 +17,7 @@ the reader and the pack always agree on one spelling of a name.
 import math
 import re
 import unicodedata
+from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from pathlib import Path
 
@@ -54,6 +55,32 @@ MAX_COUNTRIES_PER_TERM = 64
 # Keys are queried in batches, so a record costs a handful of statements.
 QUERY_KEY_CHUNK = 200
 MAX_EVIDENCE_ENTRIES = 20
+# Total located occurrences across the bounded forms of one retrieval.
+MAX_OCCURRENCES = 1024
+
+
+class OccurrenceLimitExceeded(ValueError):
+    """The geographic occurrence budget was exhausted; callers must review."""
+
+
+class _SpanIndex:
+    """Strict containment queries in O(log n), after O(n log n) construction."""
+
+    def __init__(self, spans):
+        ordered = sorted(set(spans))
+        self.starts = [start for start, _end in ordered]
+        self.max_ends = []
+        maximum = -1
+        for _start, end in ordered:
+            maximum = max(maximum, end)
+            self.max_ends.append(maximum)
+
+    def covers(self, start: int, end: int) -> bool:
+        index = bisect_right(self.starts, start) - 1
+        if index >= 0 and self.max_ends[index] > end:
+            return True
+        earlier = bisect_left(self.starts, start) - 1
+        return earlier >= 0 and self.max_ends[earlier] >= end
 
 COUNTRY_FEATURE_CODES = frozenset({"PCLI", "PCLX", "PCLS", "PCLD"})
 
@@ -62,6 +89,20 @@ COUNTRY_FEATURE_CODES = frozenset({"PCLI", "PCLX", "PCLS", "PCLD"})
 # appended when the plain name matched nothing at all, so a name that
 # already resolves is never made ambiguous.
 HAN_ADMIN_SUFFIXES = ("市", "縣", "区", "區", "鎮", "镇", "鄉", "乡", "省")
+
+# Official country spellings are semantic evidence, not any "<X> of <Y>"
+# phrase. "State of Georgia" is a state; "Republic of India" and
+# "Co-operative Republic of Guyana" are country names.
+SOVEREIGN_NAME_DESIGNATORS = frozenset({
+    "republic", "kingdom", "commonwealth", "federation", "confederation",
+    "sultanate", "emirate", "principality", "duchy", "union",
+})
+SOVEREIGN_NAME_MODIFIERS = frozenset({
+    "co", "operative", "cooperative", "democratic", "federal", "grand",
+    "independent", "islamic", "arab", "bolivarian", "oriental",
+    "people", "s", "plurinational", "socialist", "sovereign",
+})
+SOVEREIGN_NAME_CONNECTORS = frozenset({"of", "the", "and"})
 
 # Address structure words are never geographic evidence on their own. A
 # multi-word place name that merely contains one of them ("Hyde Park") is
@@ -272,8 +313,138 @@ def _chunked(items: list[str], size: int):
         yield items[start:start + size]
 
 
+def _is_name_separator(value: str) -> bool:
+    """True for whitespace/punctuation, never marks, symbols or controls."""
+    return bool(value) and all(
+        char.isspace() or unicodedata.category(char).startswith('P')
+        for char in value
+    )
+
+
+def _han_admin_extension(longer: str, shorter: str) -> bool:
+    """True when a Han name is the short place name plus its admin suffix."""
+    return (_is_han_term(shorter)
+            and longer.startswith(shorter)
+            and longer[len(shorter):] in HAN_ADMIN_SUFFIXES)
+
+
+def _is_sovereign_country_prefix(words) -> bool:
+    """Validate the words before a country name in an official spelling."""
+    tokens = [str(word).casefold() for word in words]
+    if not tokens or not any(token in SOVEREIGN_NAME_DESIGNATORS for token in tokens):
+        return False
+    if "state" in tokens and not any(
+            token in {"independent", "plurinational", "sovereign"}
+            for token in tokens):
+        return False
+    return all(token in SOVEREIGN_NAME_DESIGNATORS
+               or token in SOVEREIGN_NAME_MODIFIERS
+               or token in SOVEREIGN_NAME_CONNECTORS
+               or token in {"state", "states"}
+               for token in tokens)
+
+
+def _is_sovereign_country_expansion(longer: str, shorter: str) -> bool:
+    """True when ``longer`` is a validated official spelling of ``shorter``."""
+    long_words = _LATIN.findall(unicodedata.normalize('NFKC', longer).casefold())
+    short_words = _LATIN.findall(unicodedata.normalize('NFKC', shorter).casefold())
+    if not short_words or long_words[-len(short_words):] != short_words:
+        return False
+    return _is_sovereign_country_prefix(long_words[:-len(short_words)])
+
+
+def _term_spans(text: str, term: str):
+    """Use the same punctuation and word boundaries in retrieval and review."""
+    term = unicodedata.normalize('NFKC', term).casefold()
+    if _is_han_term(term):
+        body = re.escape(term)
+    else:
+        words = _LATIN.findall(term)
+        if not words:
+            return
+        # A word boundary is any Unicode alphanumeric character, not only the
+        # Latin ranges. Otherwise "India香港" looks like a standalone "India".
+        # Only whitespace and punctuation may separate the words of a name.
+        separator = r"(?:[^\w]|_)+"
+        body = (r"(?<![^\W_])"
+                + separator.join(map(re.escape, words))
+                + r"(?![^\W_])")
+    # Retain overlapping repetitions, which can contain independent mentions.
+    for match in re.finditer(r"(?=(" + body + r"))", text):
+        start, end = match.span(1)
+        if not _is_han_term(term):
+            if start and not _is_name_separator(text[start - 1]):
+                continue
+            if end < len(text) and not _is_name_separator(text[end]):
+                continue
+            parts = list(_LATIN.finditer(text, start, end))
+            if len(parts) != len(words):
+                continue
+            if any(not _is_name_separator(text[left.end():right.start()])
+                   for left, right in zip(parts, parts[1:])):
+                continue
+        yield start, end
+
+
+def _suppress_nested_terms(buckets, address_forms, *, retain_unlocatable=False):
+    """Withdraw fragments covered at every occurrence by a longer name."""
+    weights: dict[str, float] = {}
+    countries: dict[str, set[str]] = defaultdict(set)
+    entity_countries: dict[str, set[str]] = defaultdict(set)
+    for (term, _country), (weight, _place_id) in buckets.items():
+        weights[term] = max(weights.get(term, 0.0), weight)
+        countries[term].add(_country)
+        if weight >= COUNTRY_ENTITY_WEIGHT:
+            entity_countries[term].add(_country)
+    if not weights:
+        return buckets
+    segments = tuple(segment for form in address_forms for segment in _bounded_segments(form))
+    spans: dict[str, list[tuple[int, int, int]]] = {}
+    occurrence_count = 0
+    for term in weights:
+        uses = []
+        for segment_id, segment in enumerate(segments):
+            for start, end in _term_spans(segment, term):
+                occurrence_count += 1
+                if occurrence_count > MAX_OCCURRENCES:
+                    raise OccurrenceLimitExceeded('GEOGRAPHIC_OCCURRENCE_LIMIT')
+                uses.append((segment_id, start, end))
+        spans[term] = uses
+
+    kept = {}
+    for key, value in buckets.items():
+        term, _country = key
+        weight, _place_id = value
+        uses = spans.get(term, [])
+        if not uses and not retain_unlocatable:
+            continue
+        covering = defaultdict(list)
+        for other in weights:
+            if len(other) <= len(term) or term not in other:
+                continue
+            # An official country spelling that resolves to this same country
+            # identifies the short country name; it does not hide it.
+            if (_country in entity_countries[other]
+                    or _is_sovereign_country_expansion(other, term)):
+                continue
+            # A Han administrative suffix is an alternate spelling. If it
+            # resolves only to another country, it must not erase the short
+            # name's valid candidate.
+            if _han_admin_extension(other, term) and _country not in countries[other]:
+                continue
+            for segment, start, end in spans[other]:
+                covering[segment].append((start, end))
+        indexes = {segment: _SpanIndex(values) for segment, values in covering.items()}
+        if uses and all(segment in indexes and indexes[segment].covers(start, end)
+                        for segment, start, end in uses):
+            continue
+        kept[key] = value
+    return kept
+
+
 def retrieve_candidates(geo_db: Path, address_forms: tuple[str, ...],
-                        country_hint: str | None = None, limit: int = 20) -> list[DestinationCandidate]:
+                        country_hint: str | None = None, limit: int = 20,
+                        *, retain_unlocatable_terms: bool = False) -> list[DestinationCandidate]:
     """Return bounded destination hypotheses for the supplied address forms.
 
     ``support`` is the explainable evidence mass of a destination and
@@ -284,6 +455,9 @@ def retrieve_candidates(geo_db: Path, address_forms: tuple[str, ...],
     The result never holds more than ``limit`` candidates. A structured
     country hint is always reported, so it displaces the weakest geographic
     hypothesis when the budget is exhausted.
+
+    More than 1,024 matched occurrences across the bounded forms raises
+    ``OccurrenceLimitExceeded``; the classifier returns explicit review.
     """
     if limit < 1:
         return []
@@ -295,8 +469,8 @@ def retrieve_candidates(geo_db: Path, address_forms: tuple[str, ...],
         for variant in variants:
             key_owner.setdefault(variant, canonical)
 
-    # place_id -> (weight, name, country, feature_class)
-    place_rows: dict[int, tuple[float, str, str, str]] = {}
+    # place_id -> (weight, name, country, feature_class, feature_code)
+    place_rows: dict[int, tuple[float, str, str, str, str]] = {}
     # place_id -> longest canonical term that matched it
     place_terms: dict[int, str] = {}
     # every canonical term that produced evidence
@@ -323,7 +497,8 @@ def retrieve_candidates(geo_db: Path, address_forms: tuple[str, ...],
                     matched_canonicals.add(canonical)
                     current = place_rows.get(place_id)
                     if current is None or weight > current[0]:
-                        place_rows[place_id] = (weight, name, country, feature_class)
+                        place_rows[place_id] = (
+                            weight, name, country, feature_class, feature_code)
                     known = place_terms.get(place_id)
                     if known is None or len(canonical) > len(known):
                         place_terms[place_id] = canonical
@@ -346,7 +521,7 @@ def retrieve_candidates(geo_db: Path, address_forms: tuple[str, ...],
 
     # (canonical term, country) -> (weight, place_id)
     buckets: dict[tuple[str, str], tuple[float, int]] = {}
-    for place_id, (weight, _name, country, _cls) in place_rows.items():
+    for place_id, (weight, _name, country, _cls, _code) in place_rows.items():
         canonical = place_terms.get(place_id)
         if canonical is None:
             continue
@@ -355,6 +530,8 @@ def retrieve_candidates(geo_db: Path, address_forms: tuple[str, ...],
         if current is None or weight > current[0]:
             buckets[key] = (weight, place_id)
 
+    buckets = _suppress_nested_terms(
+        buckets, address_forms, retain_unlocatable=retain_unlocatable_terms)
     per_country: dict[str, dict[str, tuple[float, int]]] = defaultdict(dict)
     for (canonical, country), value in buckets.items():
         per_country[country][canonical] = value
@@ -363,14 +540,17 @@ def retrieve_candidates(geo_db: Path, address_forms: tuple[str, ...],
     for country, contributions in per_country.items():
         support = 0.0
         entity_terms: list[str] = []
+        entity_feature_codes: list[tuple[str, str]] = []
         for canonical, (weight, place_id) in contributions.items():
             support += weight
             if weight >= COUNTRY_ENTITY_WEIGHT:
                 entity_terms.append(canonical)
+                entity_feature_codes.append(
+                    (canonical, place_rows[place_id][4]))
         evidence: list[str] = []
         for canonical, (_weight, place_id) in sorted(
                 contributions.items(), key=lambda item: (-item[1][0], item[0])):
-            _weight, name, _country, feature_class = place_rows[place_id]
+            _weight, name, _country, feature_class, _code = place_rows[place_id]
             entry = f"PLACE:{place_id}:{name}:{feature_class}"
             if entry not in evidence:
                 evidence.append(entry)
@@ -384,6 +564,7 @@ def retrieve_candidates(geo_db: Path, address_forms: tuple[str, ...],
             token_count=len(contributions),
             country_entity=bool(entity_terms),
             entity_terms=tuple(sorted(entity_terms)),
+            entity_feature_codes=tuple(sorted(entity_feature_codes)),
             term_support=tuple(sorted(
                 ((canonical, weight) for canonical, (weight, _) in contributions.items()),
                 key=lambda item: (-item[1], item[0]))),
@@ -408,5 +589,6 @@ def retrieve_candidates(geo_db: Path, address_forms: tuple[str, ...],
                 hinted.destination_id,
                 ("STRUCTURED_COUNTRY_HINT",) + hinted.evidence,
                 hinted.score, hinted.support, hinted.token_count,
-                hinted.country_entity, hinted.entity_terms, hinted.term_support)
+                hinted.country_entity, hinted.entity_terms,
+                hinted.entity_feature_codes, hinted.term_support)
     return results[:limit]

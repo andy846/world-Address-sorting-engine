@@ -15,7 +15,10 @@ problems:
 """
 
 import re
+import unicodedata
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 
 from world_address_engine.hkp.approval import CatalogueApproval
@@ -23,10 +26,17 @@ from world_address_engine.models import AddressRecord, ClassificationResult
 from world_address_engine.matching.normalize import (
     contains_keyed, has_unsupported_script, normalize_address, normalize_key,
 )
-from world_address_engine.matching.retrieve import MIN_SUPPORT, retrieve_candidates
+from world_address_engine.matching.retrieve import (
+    HAN_ADMIN_SUFFIXES, MAX_OCCURRENCES, MIN_SUPPORT,
+    OccurrenceLimitExceeded, _SpanIndex, _is_name_separator,
+    _is_sovereign_country_expansion, _is_sovereign_country_prefix,
+    _term_spans, retrieve_candidates,
+)
 from world_address_engine.sqlite_util import open_db
 
 CODE_RE = re.compile(r"[A-Z]{2}")
+# Review the complete record rather than silently classifying a truncated tail.
+MAX_ADDRESS_CHARS = 10_000
 
 # A rival destination within this share of the leader's evidence is a real
 # alternative, not noise.
@@ -47,6 +57,8 @@ LATIN_STRONG_MARKERS = frozenset({
     "group", "enterprises", "industries", "trading", "logistics", "bank",
     "agency", "ventures", "partners", "foundation", "association",
     "institute", "investors", "sdn", "bhd", "pte",
+    "telecom", "telecommunications", "communications", "airlines", "airways",
+    "media", "networks", "systems",
 })
 LATIN_WEAK_MARKERS = frozenset({
     "international", "services", "service", "industry", "express",
@@ -175,78 +187,21 @@ def _fragments(text: str) -> list[tuple[str, int]]:
     return parts
 
 
-def _fragment_words(text: str) -> list[tuple[str, int, list[tuple[str, int, int]]]]:
-    result = []
-    for chunk, offset in _fragments(text):
-        words = [(m.group(0), offset + m.start(), offset + m.end()) for m in _WORD.finditer(chunk)]
-        result.append((chunk, offset, words))
-    return result
-
-
-def _latin_pattern(tokens: list[str]) -> re.Pattern[str]:
-    body = r"[\s\-_.'\u2019\u2018]*".join(re.escape(token) for token in tokens)
-    edge = r"[0-9A-Za-z\u00c0-\u024f\u1e00-\u1eff]"
-    return re.compile(r"(?<!" + edge + r")" + body + r"(?!" + edge + r")", re.IGNORECASE)
-
-
-def _latin_occurrences(scope: str, tokens: list[str]):
-    pattern = _latin_pattern(tokens)
-    for chunk, offset, words in _fragment_words(scope):
-        for match in pattern.finditer(chunk):
-            start = offset + match.start()
-            end = offset + match.end()
-            covered = [i for i, (_w, s, e) in enumerate(words) if s < end and e > start]
-            if covered:
-                yield chunk, words, covered[0], covered[-1]
-
-
-def _han_occurrences(scope: str, needle: str):
-    for chunk, _offset, _words in _fragment_words(scope):
-        index = chunk.find(needle)
-        while index >= 0:
-            yield chunk, index
-            index = chunk.find(needle, index + 1)
-
-
-def _latin_marker_near(chunk: str, words, first: int, last: int) -> bool:
+def _latin_marker_near(chunk: str, words, first: int, last: int,
+                       eligible=None, has_strong=None) -> bool:
     """True when a legal-form marker sits beside the matched phrase."""
-    eligible: dict[int, str] = {}
-    for index, (word, _start, end) in enumerate(words):
-        token = word.casefold()
-        if len(token) < MARKER_MIN_LENGTH:
-            continue
-        # A marker glued to a hyphenated compound belongs to a proper noun.
-        if chunk[end:end + 1] == '-':
-            continue
-        eligible[index] = token
+    if eligible is None:
+        eligible = {index: word.casefold() for index, (word, _start, end) in enumerate(words)
+                    if len(word) >= MARKER_MIN_LENGTH and chunk[end:end + 1] != '-'}
     low = max(0, first - MARKER_WINDOW)
     high = min(len(words) - 1, last + MARKER_WINDOW)
     nearby = [eligible[i] for i in range(low, high + 1) if i in eligible]
     if any(token in LATIN_STRONG_MARKERS for token in nearby):
         return True
     if any(token in LATIN_WEAK_MARKERS for token in nearby):
-        return any(token in LATIN_STRONG_MARKERS for token in eligible.values())
+        return has_strong if has_strong is not None else any(
+            token in LATIN_STRONG_MARKERS for token in eligible.values())
     return False
-
-
-def _latin_trailing_word(words, last: int) -> bool:
-    """True when the matched phrase is followed by another word in its fragment.
-
-    A country name followed by another word belongs to an organisation or a
-    street rather than to the address structure: "China Telecom", "London
-    Road", "Hong Kong Airlines". A following number or postal code does not
-    make it a company name, and neither does a postcode that starts with
-    letters: "Ireland D02" and "United Kingdom EC1A 1BB" are addresses.
-    """
-    if last + 1 >= len(words):
-        return False
-    following = words[last + 1][0]
-    if not following[:1].isalpha():
-        return False
-    if any(char.isdigit() for char in following):
-        # A postal code or a unit number, not a company word.
-        return False
-    return following.casefold() not in TRAILING_EXEMPT
 
 
 def _han_marker_near(chunk: str, index: int, length: int) -> bool:
@@ -259,27 +214,228 @@ def _han_marker_near(chunk: str, index: int, length: int) -> bool:
     return False
 
 
-def _is_company_adjacent(scope: str, needle: str) -> bool:
-    """True when every occurrence of `needle` belongs to a company name."""
+@dataclass
+class _Occurrence:
+    """One located name plus the fragment context needed to review it."""
+
+    start: int
+    end: int
+    company: bool
+    context_key: tuple[int, int]
+    first: int | None
+    last: int | None
+    han: bool
+
+
+def _address_like_prefix(words) -> bool:
+    """True for state/postal structure such as ``NY`` or ``CO 80202``."""
+    tokens = [word.casefold() for word in words]
+    if not tokens or not all(
+            token.isdigit() or (token.isalpha() and len(token) <= 2)
+            for token in tokens):
+        return False
+    return any(token.isdigit() for token in tokens) or all(
+        token.isalpha() and len(token) == 2 for token in tokens)
+
+
+def _scan_left(scope: str, left: int, position: int, *, han: bool) -> int:
+    """Move left across separators and, for Han, administrative suffixes."""
+    while position > left:
+        char = scope[position - 1]
+        if _is_name_separator(char) or (han and char in HAN_ADMIN_SUFFIXES):
+            position -= 1
+            continue
+        break
+    return position
+
+
+def _scan_right(scope: str, right: int, position: int, *, han: bool) -> int:
+    """Move right across separators and, for Han, administrative suffixes."""
+    while position < right:
+        char = scope[position]
+        if _is_name_separator(char) or (han and char in HAN_ADMIN_SUFFIXES):
+            position += 1
+            continue
+        break
+    return position
+
+
+def _neighbor_is_geographic(edge, spans_by_edge) -> bool:
+    """True when a strong geographic span ends or starts at ``edge``."""
+    return edge in spans_by_edge
+
+
+def _structural_company(occurrence: _Occurrence, scope: str, contexts,
+                        latin_by_start, latin_by_end,
+                        han_by_start, han_by_end) -> bool:
+    """Return whether adjacent non-geographic text makes a use a brand."""
+    left, right = occurrence.context_key
+    if occurrence.han:
+        before = _scan_left(scope, left, occurrence.start, han=True)
+        after = _scan_right(scope, right, occurrence.end, han=True)
+        before_ok = (before == left
+                     or _neighbor_is_geographic(before, han_by_end))
+        after_ok = (after == right
+                    or _neighbor_is_geographic(after, han_by_start))
+        return not (before_ok and after_ok)
+
+    words, starts, ends, _eligible, _has_strong = contexts[occurrence.context_key]
+    first = occurrence.first
+    last = occurrence.last
+    if first is None or last is None:
+        return False
+
+    leading_company = False
+    if first > 0:
+        edge = _scan_left(scope, left, occurrence.start, han=False)
+        prefix = [word for word, _start, _end in words[:first]]
+        leading_company = not (
+            _neighbor_is_geographic(edge, latin_by_end)
+            or _address_like_prefix(prefix)
+            or _is_sovereign_country_prefix(prefix)
+        )
+
+    trailing_company = False
+    if last + 1 < len(words):
+        following = words[last + 1][0]
+        edge = _scan_right(scope, right, occurrence.end, han=False)
+        has_digit = any(char.isdigit() for char in following)
+        trailing_company = not (
+            has_digit
+            or following.casefold() in TRAILING_EXEMPT
+            or _neighbor_is_geographic(edge, latin_by_start)
+            or (following.isalpha() and len(following) <= 2)
+        )
+    return leading_company or trailing_company
+
+
+def _strong_geographic_spans(candidates, occurrences) -> set[tuple[int, int]]:
+    """Spans that may legitimately introduce or follow another place name."""
+    return {
+        (occurrence.start, occurrence.end)
+        for candidate in candidates
+        for term, weight in candidate.term_support
+        if weight >= MIN_SUPPORT or term in candidate.entity_terms
+        for occurrence in occurrences[term]
+        if not occurrence.company
+    }
+
+
+def _candidate_geographic_spans(candidates, occurrences) -> set[tuple[int, int]]:
+    """Every located candidate span, including deep Han administrative names."""
+    return {
+        (occurrence.start, occurrence.end)
+        for candidate in candidates
+        for term, _weight in candidate.term_support
+        for occurrence in occurrences[term]
+    }
+
+
+def _refine_occurrence_context(scope: str, candidates, occurrences, contexts) -> None:
+    """Resolve leading/trailing brand context against known geography.
+
+    Strong spans can themselves become company context, so recompute until the
+    set stops shrinking. The loop is bounded because a span can only move from
+    independent to company, never back.
+    """
+    unique = {}
+    for uses in occurrences.values():
+        for occurrence in uses:
+            unique[id(occurrence)] = occurrence
+    for _ in range(3):
+        latin_spans = _strong_geographic_spans(candidates, occurrences)
+        han_spans = _candidate_geographic_spans(candidates, occurrences)
+        latin_by_start = {start for start, _end in latin_spans}
+        latin_by_end = {end for _start, end in latin_spans}
+        han_by_start = {start for start, _end in han_spans}
+        han_by_end = {end for _start, end in han_spans}
+        changed = False
+        for occurrence in unique.values():
+            if occurrence.company:
+                continue
+            company = _structural_company(
+                occurrence, scope, contexts,
+                latin_by_start, latin_by_end, han_by_start, han_by_end)
+            if company:
+                occurrence.company = True
+                changed = True
+        if not changed:
+            return
+
+
+@lru_cache(maxsize=4096)
+def _occurrence_variants(needle: str) -> tuple[str, ...]:
+    """Project trusted name variants back to positions in the original scope."""
+    return tuple(sorted(normalize_address(needle))) if _is_han(needle) else (needle,)
+
+
+def _name_occurrences(scope: str, needle: str, *, limit=MAX_OCCURRENCES,
+                      contexts=None) -> list[_Occurrence]:
+    """Locate a name and retain the context needed for a later company review."""
+    needle = normalize_key(needle)
     if not needle:
-        return False
-    if _is_han(needle):
-        occurrences = list(_han_occurrences(scope, needle))
-        if not occurrences:
-            return False
-        return all(_han_marker_near(chunk, index, len(needle)) for chunk, index in occurrences)
-    tokens = needle.split()
-    if not tokens:
-        return False
-    occurrences = list(_latin_occurrences(scope, tokens))
-    if not occurrences:
-        return False
-    return all(_latin_marker_near(chunk, words, first, last)
-               or _latin_trailing_word(words, last)
-               for chunk, words, first, last in occurrences)
+        return []
+    spans = set()
+    for variant in _occurrence_variants(needle):
+        for span in _term_spans(scope, variant):
+            spans.add(span)
+            if len(spans) > limit:
+                raise OccurrenceLimitExceeded('GEOGRAPHIC_OCCURRENCE_LIMIT')
+    if not spans:
+        return []
+    if contexts is None:
+        contexts = {}
+    if 'fragments' not in contexts:
+        fragments = _fragments(scope)
+        contexts['fragments'] = (fragments, [offset for _, offset in fragments])
+    fragments, offsets = contexts['fragments']
+    found = []
+    for start, end in sorted(spans):
+        first_fragment = bisect_right(offsets, start) - 1
+        last_fragment = bisect_right(offsets, end - 1) - 1
+        left = offsets[first_fragment]
+        right = offsets[last_fragment] + len(fragments[last_fragment][0])
+        chunk = scope[left:right]
+        if _is_han(needle):
+            company = _han_marker_near(chunk, start - left, end - start)
+            occurrence = _Occurrence(
+                start, end, company, (left, right), None, None, True)
+        else:
+            key = (left, right)
+            if key not in contexts:
+                words = [(m.group(), m.start(), m.end()) for m in _WORD.finditer(chunk)]
+                eligible = {i: word.casefold() for i, (word, _, word_end) in enumerate(words)
+                            if len(word) >= MARKER_MIN_LENGTH and chunk[word_end:word_end + 1] != '-'}
+                contexts[key] = (words, [s for _, s, _ in words], [e for _, _, e in words],
+                                 eligible, any(w in LATIN_STRONG_MARKERS for w in eligible.values()))
+            words, starts, ends, eligible, has_strong = contexts[key]
+            first = bisect_right(ends, start - left)
+            last = bisect_left(starts, end - left) - 1
+            company = _latin_marker_near(
+                chunk, words, first, last, eligible, has_strong)
+            occurrence = _Occurrence(
+                start, end, company, key, first, last, False)
+        found.append(occurrence)
+    return found
 
 
-def _effective_support(candidates, scope: str):
+def _outside_longer_names(occurrences, covering_spans):
+    """Keep independent mentions, including repetitions beside a nested mention."""
+    index = covering_spans if isinstance(covering_spans, _SpanIndex) else _SpanIndex(covering_spans)
+    return [occurrence for occurrence in occurrences
+            if not index.covers(occurrence.start, occurrence.end)]
+
+
+def _uncontested(occurrences, iso, local_span_owners):
+    """Drop a country word also claimed as a locality in another country."""
+    return [occurrence for occurrence in occurrences
+            if not any(owner != iso
+                       for owner in local_span_owners.get(
+                           (occurrence.start, occurrence.end), ()))]
+
+
+def _effective_support(candidates, scope: str, occurrences, covering_index,
+                       local_span_owners):
     """Evidence mass per destination after withdrawing company-name evidence."""
     support: dict[str, float] = {}
     tokens: dict[str, int] = {}
@@ -288,8 +444,18 @@ def _effective_support(candidates, scope: str):
     terms: dict[str, set[str]] = {}
     entity_only: dict[str, bool] = {}
     for candidate in candidates:
-        suppressed = {term for term, _weight in candidate.term_support
-                      if _is_company_adjacent(scope, term)}
+        suppressed = set()
+        for term, _weight in candidate.term_support:
+            uses = occurrences[term]
+            if term in candidate.entity_terms:
+                uses = _outside_longer_names(
+                    uses, covering_index(candidate.destination_id))
+                uses = _uncontested(
+                    uses, candidate.destination_id, local_span_owners)
+            if uses and all(occurrence.company for occurrence in uses):
+                suppressed.add(term)
+            elif not uses and occurrences[term]:
+                suppressed.add(term)
         remaining = [(term, weight) for term, weight in candidate.term_support
                      if term not in suppressed]
         support[candidate.destination_id] = sum(weight for _term, weight in remaining)
@@ -327,30 +493,14 @@ def _resolve_hint(hint: str | None, catalogue: _Catalogue) -> str | None:
     return None
 
 
-def _word_count(term: str) -> int:
-    """The number of words in a canonical search term or a catalogue name."""
-    return len(term.split())
-
-
-def _subsumes(bigger: set[str], smaller: set[str]) -> bool:
-    """True when a term of `bigger` holds a term of `smaller` as a word run.
-
-    A longer match that contains the shorter one is a more specific reading
-    of the same words: "Guinea" inside "Papua New Guinea", "Korea" inside
-    "Republic of Korea", "Henderson" inside "Pitcairn, Henderson, Ducie and
-    Oeno Islands". The shorter reading is therefore not an independent
-    hypothesis about the address.
-    """
-    for big in bigger:
-        for small in smaller:
-            if _word_count(big) > _word_count(small) and contains_keyed(big, small):
-                return True
-    return False
-
-
 def classify_record(record: AddressRecord, geo_db: Path, hkp_db: Path,
                     approval: CatalogueApproval | None = None) -> ClassificationResult:
-    """Classify one record against the reference pack and the HKP master."""
+    """Classify offline, with explicit review instead of truncated evidence.
+
+    Address plus hint is limited to 10,000 input characters; the NFKC scope
+    also has a 10,000-character limit. More than 1,024 located occurrences returns
+    REVIEW_AMBIGUOUS. Original record fields are never changed.
+    """
     def result(status, code=None, confidence=0.0, reason='', destination_id=None, evidence=()):
         names = catalogue.names_by_destination.get(destination_id, ('', '', '')) \
             if destination_id else ('', '', '')
@@ -361,46 +511,168 @@ def classify_record(record: AddressRecord, geo_db: Path, hkp_db: Path,
 
     if record.input_error:
         return result('INPUT_ERROR', reason=record.input_error)
+    if len(record.address_text) + len(record.country_hint or '') > MAX_ADDRESS_CHARS:
+        return result('REVIEW_AMBIGUOUS', reason='ADDRESS_TOO_LONG')
     if not record.address_text.strip() and not record.country_hint:
         return result('UNKNOWN', reason='EMPTY_ADDRESS')
-    if has_unsupported_script(record.address_text):
-        return result('UNKNOWN', reason='UNSUPPORTED_LANGUAGE')
-
     catalogue = _catalogue(Path(hkp_db), approval)
     # The first line of a multi-line address is the recipient, not a place.
     lines = [line.strip() for line in record.address_text.splitlines() if line.strip()]
     scope = '\n'.join(lines[1:]) if len(lines) > 1 else record.address_text
+    scope = unicodedata.normalize('NFKC', scope).casefold()
+    if len(scope) > MAX_ADDRESS_CHARS:
+        return result('REVIEW_AMBIGUOUS', reason='ADDRESS_TOO_LONG')
+    if has_unsupported_script(scope):
+        return result('UNKNOWN', reason='UNSUPPORTED_LANGUAGE')
+    forms = normalize_address(scope)
+    try:
+        candidates = retrieve_candidates(
+            Path(geo_db), forms, record.country_hint,
+            retain_unlocatable_terms=True,
+        )
+    except OccurrenceLimitExceeded:
+        return result('REVIEW_AMBIGUOUS', reason='GEOGRAPHIC_OCCURRENCE_LIMIT')
+    names = {term for candidate in candidates for term, _ in candidate.term_support}
+    names.update(alias for aliases in catalogue.names_by_iso.values() for alias in aliases if alias)
+    occurrences = {}
+    by_key = {}
+    contexts = {}
+    remaining = MAX_OCCURRENCES
+    try:
+        for name in sorted(names):
+            key = normalize_key(name)
+            variants = _occurrence_variants(key)
+            if variants not in by_key:
+                by_key[variants] = _name_occurrences(scope, key, limit=remaining, contexts=contexts)
+                remaining -= len(by_key[variants])
+            occurrences[name] = by_key[variants]
+    except OccurrenceLimitExceeded:
+        return result('REVIEW_AMBIGUOUS', reason='GEOGRAPHIC_OCCURRENCE_LIMIT')
+    if any(not occurrences[term] for candidate in candidates for term, _ in candidate.term_support):
+        return result('REVIEW_AMBIGUOUS', reason='UNLOCATABLE_GEOGRAPHIC_TERM')
+    _refine_occurrence_context(scope, candidates, occurrences, contexts)
+    # A longer geographic name owns only its own span. Weight is irrelevant
+    # for ordinary localities, but a country entity spelling that resolves to
+    # the same country is an alternate official name and does not hide that
+    # country's short name.
+    country_entity_owners: dict[str, set[str]] = {}
+    country_entity_codes: dict[str, set[str]] = {}
+    terms_by_iso: dict[str, set[str]] = {}
+    for candidate in candidates:
+        terms_by_iso.setdefault(candidate.destination_id, set()).update(
+            term for term, _weight in candidate.term_support)
+        for term, feature_code in candidate.entity_feature_codes:
+            country_entity_codes.setdefault(term, set()).add(feature_code)
+        for term in candidate.entity_terms:
+            country_entity_owners.setdefault(term, set()).add(
+                candidate.destination_id)
+    country_entity_terms = set(country_entity_owners)
+    dependent_entity_terms = {
+        term for term, codes in country_entity_codes.items()
+        if codes and "PCLI" not in codes
+    }
 
-    candidates = retrieve_candidates(Path(geo_db), normalize_address(scope), record.country_hint)
-    support, tokens, entity, strong, terms, entity_only = _effective_support(candidates, scope)
+    local_span_owners = {}
+    for candidate in candidates:
+        # A same-spelled village in another country is common in a global
+        # gazetteer ("India" exists as a tiny settlement). It should withdraw a
+        # country name only when that local reading has corroboration from a
+        # separate, non-company term that the country reading does not also
+        # use. The population of the same-spelled place is not independent
+        # evidence.
+        if candidate.support < MIN_SUPPORT:
+            continue
+        independent_terms = {
+            term for term, _weight in candidate.term_support
+            if any(not occurrence.company for occurrence in occurrences[term])
+        }
+        for term, weight in candidate.term_support:
+            if term in candidate.entity_terms or not (independent_terms - {term}):
+                continue
+            if weight < MIN_SUPPORT:
+                continue
+            # The local place itself must be substantial. Two tiny same-spelled
+            # villages must not erase a country.
+            country_owners = country_entity_owners.get(term, set())
+            blocked_terms = {
+                other_term
+                for owner in country_owners
+                for other_term in terms_by_iso.get(owner, ())
+            }
+            other_terms = independent_terms - {term}
+            plain_terms = other_terms - country_entity_terms
+            # An explicit parent country is valid context for a genuine
+            # locality ("Macau, Brazil"), but not for a sovereign country
+            # namesake ("China, United States" / "Italy, Brazil").
+            parent_terms = {
+                other for other in other_terms & country_entity_terms
+                if (term in dependent_entity_terms
+                    and candidate.destination_id in country_entity_owners.get(other, ()))
+            }
+            if not ((plain_terms | parent_terms) - blocked_terms):
+                continue
+            for occurrence in occurrences[term]:
+                if occurrence.company:
+                    continue
+                local_span_owners.setdefault(
+                    (occurrence.start, occurrence.end), set()).add(
+                        candidate.destination_id)
+
+    covering_cache: dict[str, _SpanIndex] = {}
+
+    def covering_index(iso: str) -> _SpanIndex:
+        cached = covering_cache.get(iso)
+        if cached is not None:
+            return cached
+        aliases = catalogue.names_by_iso.get(iso, ())
+        sovereign_terms = {
+            term for candidate in candidates
+            for term, _weight in candidate.term_support
+            if any(_is_sovereign_country_expansion(term, alias)
+                   for alias in aliases if alias)
+        }
+        spans = {(occurrence.start, occurrence.end)
+                 for candidate in candidates
+                 for term, _weight in candidate.term_support
+                 if not (candidate.destination_id == iso
+                         and term in candidate.entity_terms)
+                 and term not in sovereign_terms
+                 for occurrence in occurrences[term]}
+        spans.update((occurrence.start, occurrence.end)
+                     for other_iso, aliases in catalogue.names_by_iso.items()
+                     if other_iso != iso
+                     for alias in aliases
+                     if alias
+                     for occurrence in occurrences[alias])
+        cached = _SpanIndex(spans)
+        covering_cache[iso] = cached
+        return cached
+
+    support, tokens, entity, strong, terms, entity_only = _effective_support(
+        candidates, scope, occurrences, covering_index, local_span_owners)
 
     assertion_alias: dict[str, str] = {}
     withdrawn_alias: dict[str, str] = {}
     # A country name that appears only inside a company or street name is
     # withdrawn from the evidence, but it still contradicts a different
     # destination rather than silently agreeing with one.
-    scope_key = normalize_key(scope)
     for iso, aliases in catalogue.names_by_iso.items():
-        for alias in aliases:
-            if alias and contains_keyed(scope_key, alias):
-                if _is_company_adjacent(scope, alias):
-                    withdrawn_alias.setdefault(iso, alias)
-                else:
-                    assertion_alias[iso] = alias
-                break
-    # A country name that is a whole word inside a longer matched country
-    # name is the same country, not a second one. "Guinea" inside "Papua
-    # New Guinea" would otherwise be read as a contradiction.
-    matched_alias = {**assertion_alias, **withdrawn_alias}
-    normalized_alias = {iso: normalize_key(alias) for iso, alias in matched_alias.items()}
-    subsumed = {iso for iso, alias in matched_alias.items()
-                if any(other != iso and len(normalized_alias[other]) > len(alias)
-                       and contains_keyed(normalized_alias[other], alias)
-                       for other in matched_alias)}
-    assertion_alias = {iso: alias for iso, alias in assertion_alias.items()
-                        if iso not in subsumed}
+        # A full country entity can extend a catalogue name without changing
+        # its identity. Its own occurrence supplies the company context too.
+        expanded = [term for candidate in candidates if candidate.destination_id == iso
+                    for term in candidate.entity_terms
+                    if any(alias and contains_keyed(term, alias) for alias in aliases)]
+        for alias in (*aliases, *expanded):
+            if not alias:
+                continue
+            uses = _outside_longer_names(occurrences[alias], covering_index(iso))
+            uses = _uncontested(uses, iso, local_span_owners)
+            if any(not occurrence.company for occurrence in uses):
+                assertion_alias[iso] = alias
+            elif uses:
+                withdrawn_alias[iso] = alias
     withdrawn_alias = {iso: alias for iso, alias in withdrawn_alias.items()
-                       if iso not in subsumed}
+                       if iso not in assertion_alias}
     assertions = {iso: 'CATALOGUE_NAME' for iso in assertion_alias}
     withdrawn_names = dict(withdrawn_alias)
     hint_iso = _resolve_hint(record.country_hint, catalogue)
@@ -423,9 +695,16 @@ def classify_record(record: AddressRecord, geo_db: Path, hkp_db: Path,
         own = terms.get(iso, set()) - leader_terms
         if not own:
             return False
-        return any(all(not _subsumes({leader_term}, {term})
-                       for leader_term in leader_terms)
-                   for term in own)
+        leader_spans = {
+            (occurrence.start, occurrence.end)
+            for term in leader_terms
+            for occurrence in occurrences[term]
+            if not occurrence.company
+        }
+        return any(_outside_longer_names(
+            [occurrence for occurrence in occurrences[term]
+             if not occurrence.company],
+            leader_spans) or not occurrences[term] for term in own)
 
     def matched(iso: str):
         destination_id = catalogue.iso_to_destination.get(iso)
