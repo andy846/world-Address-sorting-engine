@@ -98,8 +98,20 @@ def test_the_street_names_carry_no_place_evidence(tmp_path, monkeypatch):
     """A street name is a place name the reader would look up."""
     gazetteer = geo(tmp_path, extra_rows=[
         "\t".join(["99", "Nanjing", "Nanjing", "", "0", "0", "P", "PPL", "CN",
-                   "", "01", "", "", "", "8000000", "", "", "UTC", "2024-01-01"])])
-    places = [place for place in PLACES if place[5] in ("JP", "IN")]
+                   "", "01", "", "", "", "8000000", "", "", "UTC", "2024-01-01"])],
+        extra_aliases=[
+            "101\t1\tzh-Hant\t東京\n",
+            "102\t4\tzh-Hant\t孟買\n",
+            "103\t7\tzh\t印度\n",
+            "104\t8\tzh\t日本\n",
+        ])
+    # This tiny gazetteer contains Tokyo and Mumbai, not all Japanese and
+    # Indian cities from the global benchmark pool. Its Han names must be
+    # explicit aliases rather than depend on an optional converter.
+    places = [place for place in PLACES if place[0] in ("Tokyo", "Mumbai")]
     assert street_evidence_violations(gazetteer, places) == []
     monkeypatch.setattr("benchmark_batch.STREET_EN", ("Nanjing Road",))
-    assert street_evidence_violations(gazetteer, places)
+    violations = street_evidence_violations(gazetteer, places)
+    assert violations
+    assert all(item["problem"] == "the street name adds a country"
+               and item["countries"] == ["CN"] for item in violations)
