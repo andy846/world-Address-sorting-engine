@@ -194,6 +194,32 @@ def test_the_release_version_authority_is_consistent():
     assert packaging.project_version() == world_address_engine.__version__
 
 
+def test_bundle_exercises_default_country_gui_and_bundled_mapping():
+    pytest.importorskip('PySide6')
+    report = entry.self_test()
+    assert report['country_analysis']['window_shown'] is True
+    assert report['country_analysis']['mapping_entries'] == 235
+    assert report['country_analysis']['total_records'] == 4
+    assert report['country_analysis']['destination_counts'] == {'CN': 1, 'HK': 1, 'JP': 1}
+    assert report['country_analysis']['unresolved'] == 1
+    assert report['ok'] is True
+
+
+def test_bundle_rejects_missing_country_analysis_evidence(runtime_report):
+    report = dict(runtime_report)
+    report.pop('country_analysis', None)
+    assert 'country_analysis' in entry.report_errors(report, expected_version=packaging.project_version())
+
+
+def test_bundle_requires_offline_chinese_normalization_data(monkeypatch):
+    pytest.importorskip('PySide6')
+    from world_address_engine.matching import normalize
+    monkeypatch.setattr(normalize, '_converter', lambda kind: None)
+    report = entry.self_test()
+    assert report['ok'] is False
+    assert 'country_analysis' in report['assertion_failures']
+
+
 @pytest.mark.parametrize('name', ['nested/hidden.sqlite', 'nested/PACK.DB',
                                  'Geonames-secret/payload',
                                  'nested/compact_global.sqlite.zip',

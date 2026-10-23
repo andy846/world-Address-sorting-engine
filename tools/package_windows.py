@@ -74,6 +74,8 @@ def build(output: Path, *, onefile: bool = True) -> Path:
         '--windowed',
         '--onefile' if onefile else '--onedir',
         '--copy-metadata', DISTRIBUTION,
+        '--collect-data', 'opencc',
+        '--collect-all', 'world_address_engine.resources',
         str(ENTRY_POINT),
     ]
     result = subprocess.run(command, cwd=str(REPO_ROOT), env=build_environment())

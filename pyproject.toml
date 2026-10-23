@@ -7,7 +7,7 @@ name = "world-address-sorting-engine"
 version = "0.1.0a2"
 description = "Fully offline, Hongkong Post destination address classifier"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["opencc-python-reimplemented==0.1.7"]
 
 [project.scripts]
 world-address-engine = "world_address_engine.cli:main"

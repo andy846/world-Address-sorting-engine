@@ -8,12 +8,14 @@ from collections import Counter
 import json
 from pathlib import Path
 import sys
+from typing import Callable
 from world_address_engine.io.delimited import iter_csv_records, iter_txt_records
 
 
 def preview(path: Path, encoding: str = 'utf-8-sig', address_columns: tuple[str,...] = (),
             sheet_name: str | None = None, txt_mode: str = 'line',
-            delimiter: str | None = None) -> dict:
+            delimiter: str | None = None, *,
+            cancel_requested: Callable[[], bool] | None = None) -> dict:
     kind=path.suffix.lower()
     if kind=='.csv':
         rows=iter_csv_records(path,encoding,address_columns)
@@ -31,17 +33,24 @@ def preview(path: Path, encoding: str = 'utf-8-sig', address_columns: tuple[str,
         raise ValueError('Unsupported input format: use .csv, .xlsx or .txt')
     total=0;issues=0; extras=0; empty=0; lines=Counter()
     headers=[]; used=[]
-    for record in rows:
-        total+=1
-        if total==1:
-            headers=list(record.fields)
-            used=list(address_columns) if address_columns else [x for x in headers if x.startswith('NAME_ADDRESS_LINE')]
-            if not used and kind=='.txt': used=[x for x in headers if x.startswith('Text_')]
-        issues+=bool(record.input_error)
-        extras+=any(v for k,v in record.fields.items() if k.startswith('Unnamed_'))
-        empty+=not bool(record.address_text.strip())
-        lines[len([v for v in record.address_text.splitlines() if v.strip()])]+=1
-    return {
+    cancelled = False
+    try:
+        for record in rows:
+            if cancel_requested is not None and cancel_requested():
+                cancelled = True
+                break
+            total+=1
+            if total==1:
+                headers=list(record.fields)
+                used=list(address_columns) if address_columns else [x for x in headers if x.startswith('NAME_ADDRESS_LINE')]
+                if not used and kind=='.txt': used=[x for x in headers if x.startswith('Text_')]
+            issues+=bool(record.input_error)
+            extras+=any(v for k,v in record.fields.items() if k.startswith('Unnamed_'))
+            empty+=not bool(record.address_text.strip())
+            lines[len([v for v in record.address_text.splitlines() if v.strip()])]+=1
+    finally:
+        rows.close()
+    result = {
         'input_file':path.name, 'format':kind.lstrip('.'), 'total_records':total,
         'original_columns':len(headers), 'address_columns':used,
         'records_with_extra_unnamed_data':extras,
@@ -49,6 +58,9 @@ def preview(path: Path, encoding: str = 'utf-8-sig', address_columns: tuple[str,
         'nonempty_address_line_distribution':dict(sorted(lines.items())),
         'classifications_run':False,
     }
+    if cancelled:
+        result['cancelled'] = True
+    return result
 
 
 def main(argv: list[str] | None=None) -> int:

@@ -70,6 +70,13 @@ def report_errors(report, *, expected_version: str, require_frozen: bool = False
               if type(report.get(name)) is not type(value) or report[name] != value]
     if report.get('error'):
         errors.append('error')
+    expected_country = {
+        'window_shown': True, 'mapping_entries': 235, 'total_records': 4,
+        'destination_counts': {'CN': 1, 'HK': 1, 'JP': 1}, 'unresolved': 1,
+        'normalization_loaded': True,
+    }
+    if report.get('country_analysis') != expected_country:
+        errors.append('country_analysis')
     for name, rows in (('preview', 9604), ('xlsx_preview', 1)):
         preview = report.get(name)
         shape = {'total_records': rows, 'original_columns': 12,
@@ -156,6 +163,36 @@ def self_test() -> dict:
                 report['approval_refused'] = str(exc) == APPROVAL_REFUSAL
                 report['classification_error'] = str(exc)
             report['classification_output_created'] = output.exists()
+            from world_address_engine.data.country_codes import load_country_codes
+            from world_address_engine.gui.country_app import CountryAnalysisWindow
+            from world_address_engine.jobs.country_analysis import analyze_job
+            from world_address_engine.matching.normalize import _converter
+
+            country_window = CountryAnalysisWindow()
+            try:
+                country_window.show()
+                app.processEvents()
+                country_input = work / 'country-synthetic.csv'
+                with country_input.open('w', encoding='utf-8-sig', newline='') as stream:
+                    writer = csv.writer(stream)
+                    writer.writerow(['Address', 'Control no'])
+                    for index, address in enumerate(('Hong Kong', 'China', 'Japan', ''), 1):
+                        writer.writerow([address, f'{index:04d}'])
+                country_report = analyze_job(
+                    country_input, work / 'country-output', geo_db,
+                    {'address_columns': ['Address']})
+                report['country_analysis'] = {
+                    'window_shown': country_window.isVisible(),
+                    'mapping_entries': len(load_country_codes().entries),
+                    'total_records': country_report['total_records'],
+                    'destination_counts': country_report['destination_counts'],
+                    'unresolved': country_report['status_counts']['UNRESOLVED'],
+                    'normalization_loaded': all(_converter(kind) is not None
+                                                for kind in ('t2s', 's2t')),
+                }
+            finally:
+                country_window.close()
+                app.processEvents()
     finally:
         window.close()
         app.processEvents()

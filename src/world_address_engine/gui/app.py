@@ -819,8 +819,10 @@ class MainWindow(QMainWindow):
 
 def main(argv: list[str] | None = None) -> int:
     from PySide6.QtWidgets import QApplication
+    from world_address_engine.gui.country_app import CountryAnalysisWindow
+
     app = QApplication(argv if argv is not None else sys.argv[:1])
-    window = MainWindow()
+    window = CountryAnalysisWindow()
     window.show()
     return app.exec()
 
