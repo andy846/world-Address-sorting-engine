@@ -305,3 +305,14 @@ archive test stopped at the missing-PyInstaller guard (630 passed, 52 skipped,
 to exercise archive checks instead of skipping them. No release was published
 by that failed run.
 
+The corrected release run
+[39920596422](https://github.com/andy846/world-Address-sorting-engine/actions/runs/39920596422)
+at `662689c` succeeded in Linux verification, Windows verification and
+publication. The [alpha.1 prerelease](https://github.com/andy846/world-Address-sorting-engine/releases/tag/v0.1.0-alpha.1)
+contains exactly the 72,286-byte wheel, 48,558,360-byte Windows EXE and
+213-byte checksum file. All three were independently downloaded and hashed;
+the downloaded EXE passed its packaged self-test on local Windows. Alpha.0
+digests were unchanged and PR #1 remained Draft. Full test counts, hashes,
+review rulings, scope limits and outstanding gates are in
+`docs/releases/v0.1.0-alpha.1-validation.md`.
+
