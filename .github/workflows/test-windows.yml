@@ -12,7 +12,11 @@ on:
 jobs:
   windows-regression:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONIOENCODING: utf-8
+      WASE_RUN_PACKAGING_TESTS: "1"
     steps:
       - name: Checkout the development snapshot
         uses: actions/checkout@v4
@@ -23,7 +27,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install development/test dependencies
-        run: python -m pip install -e ".[excel,test]"
+        run: python -m pip install -e ".[excel,gui,packaging,test]"
 
       # POSIX allows renaming or deleting a file that is still open, so a
       # leaked SQLite handle is invisible on the Linux runners used by the
