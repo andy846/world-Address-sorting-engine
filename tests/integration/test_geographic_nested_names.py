@@ -212,6 +212,49 @@ def test_real_pack_never_asserts_a_country_from_brand_text(text, pack, master):
 
 
 @pytest.mark.parametrize('text', [
+    'China, Mobile', 'Mobile, China', 'China; Mobile',
+])
+def test_real_pack_never_erases_a_country_for_a_village_of_the_same_name(
+        text, pack, master):
+    """A village that shares a country name does not erase the country."""
+    result = classify(rec(text), pack, master)
+    assert result.status != 'MATCHED'
+    assert result.hkp_code != 'US'
+
+
+def test_real_pack_never_asserts_a_village_country_from_official_name_text(
+        pack, master):
+    result = classify(rec('Republic of China'), pack, master)
+    assert result.status != 'MATCHED'
+    assert result.hkp_code != 'US'
+
+
+@pytest.mark.parametrize('text', ['France Target', 'Target France'])
+def test_real_pack_does_not_assert_a_country_from_a_subdivision_brand(
+        text, pack, master):
+    """A sub-division of a country is not evidence that the text names it."""
+    result = classify(rec(text), pack, master)
+    assert result.status != 'MATCHED'
+    assert result.hkp_code != 'FR'
+
+
+@pytest.mark.parametrize('text', ['中国東京', '東京中国', '日本上海', '上海日本'])
+def test_real_pack_does_not_assert_a_country_next_to_a_foreign_han_city(
+        text, pack, master):
+    result = classify(rec(text), pack, master)
+    assert result.status != 'MATCHED'
+    assert result.hkp_code is None
+
+
+@pytest.mark.xfail(reason='the pack has no Simplified Chinese alias for the '
+                   'Hong Kong SAR, only the Traditional one', strict=False)
+def test_real_pack_matches_the_hong_kong_sar_in_simplified_chinese(pack, master):
+    """Records the gap that the pack keeps the alias in Traditional Chinese."""
+    result = classify(rec('中华人民共和国香港特别行政区'), pack, master)
+    assert result.hkp_code == 'HK'
+
+
+@pytest.mark.parametrize('text', [
     'Bearna Ireland', 'Castlerea Ireland', 'Tobercurry Ireland',
     'Bunclody Ireland', 'Bundoran Ireland',
 ])

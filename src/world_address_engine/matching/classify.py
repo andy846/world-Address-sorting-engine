@@ -28,7 +28,8 @@ from world_address_engine.matching.normalize import (
 )
 from world_address_engine.matching.retrieve import (
     COUNTRY_FEATURE_CODES, HAN_ADMIN_SUFFIXES, MAX_OCCURRENCES, MIN_SUPPORT,
-    OccurrenceLimitExceeded, _SpanIndex, _is_name_separator,
+    PLACE_CONTEXT_MIN_WEIGHT, OccurrenceLimitExceeded, _SpanIndex,
+    _is_name_separator,
     _is_sovereign_country_expansion, _is_sovereign_country_prefix,
     _term_spans, retrieve_candidates,
 )
@@ -269,9 +270,13 @@ def _neighbor_is_geographic(edge, spans_by_edge) -> bool:
 def _same_country_neighbour(edge, countries_by_edge, own_countries) -> bool:
     """True when the adjacent word names a place of the same country.
 
-    A small locality of the country is geographic context even when its own
+    A settlement of the country is geographic context even when its own
     weight is below the assertion threshold, so "Bearna Ireland" is an
-    address chain rather than a company name.
+    address chain rather than a company name. The neighbour must be
+    substantial: a hamlet of a few hundred people, such as the commune
+    "Target" in France, is as likely to be an ordinary word that happens to
+    be a place name, and treating it as context would turn "France Target"
+    into an asserted destination.
     """
     if not own_countries:
         return False
@@ -282,7 +287,7 @@ def _same_country_neighbour(edge, countries_by_edge, own_countries) -> bool:
 def _structural_company(occurrence: _Occurrence, scope: str, contexts,
                         latin_by_start, latin_by_end,
                         han_by_start, han_by_end,
-                        end_countries, start_countries,
+                        substantial_end_countries, substantial_start_countries,
                         entity_countries) -> bool:
     """Return whether adjacent non-geographic text makes a use a brand."""
     left, right = occurrence.context_key
@@ -308,7 +313,8 @@ def _structural_company(occurrence: _Occurrence, scope: str, contexts,
         prefix = [word for word, _start, _end in words[:first]]
         leading_company = not (
             _neighbor_is_geographic(edge, latin_by_end)
-            or _same_country_neighbour(edge, end_countries, own_countries)
+            or _same_country_neighbour(
+                edge, substantial_end_countries, own_countries)
             or _address_like_prefix(prefix)
             or _is_sovereign_country_prefix(prefix)
         )
@@ -322,7 +328,8 @@ def _structural_company(occurrence: _Occurrence, scope: str, contexts,
             has_digit
             or following.casefold() in TRAILING_EXEMPT
             or _neighbor_is_geographic(edge, latin_by_start)
-            or _same_country_neighbour(edge, start_countries, own_countries)
+            or _same_country_neighbour(
+                edge, substantial_start_countries, own_countries)
             or (following.isalpha() and len(following) <= 2)
         )
     return leading_company or trailing_company
@@ -351,7 +358,7 @@ def _candidate_geographic_spans(candidates, occurrences) -> set[tuple[int, int]]
 
 
 def _refine_occurrence_context(scope: str, candidates, occurrences, contexts,
-                               end_countries, start_countries,
+                               substantial_end_countries, substantial_start_countries,
                                entity_countries) -> None:
     """Resolve leading/trailing brand context against known geography.
 
@@ -377,7 +384,7 @@ def _refine_occurrence_context(scope: str, candidates, occurrences, contexts,
             company = _structural_company(
                 occurrence, scope, contexts,
                 latin_by_start, latin_by_end, han_by_start, han_by_end,
-                end_countries, start_countries, entity_countries)
+                substantial_end_countries, substantial_start_countries, entity_countries)
             if company:
                 occurrence.company = True
                 changed = True
@@ -390,15 +397,23 @@ def _country_maps(candidates):
     term_countries: dict[str, set[str]] = {}
     entity_countries: dict[str, set[str]] = {}
     sovereign_terms: set[str] = set()
+    substantial_countries: dict[str, set[str]] = {}
     for candidate in candidates:
-        for term, _weight in candidate.term_support:
+        for term, weight in candidate.term_support:
             term_countries.setdefault(term, set()).add(candidate.destination_id)
+            # Only a substantial place may act as the geographic context of
+            # its own country: a hamlet of a few hundred people is as likely
+            # to be an ordinary word that happens to be a place name.
+            if weight >= PLACE_CONTEXT_MIN_WEIGHT:
+                substantial_countries.setdefault(term, set()).add(
+                    candidate.destination_id)
         for term in candidate.entity_terms:
             entity_countries.setdefault(term, set()).add(candidate.destination_id)
         for term, feature_code in candidate.entity_feature_codes:
             if feature_code in COUNTRY_FEATURE_CODES:
                 sovereign_terms.add(term)
-    return term_countries, entity_countries, sovereign_terms
+    return (term_countries, entity_countries, sovereign_terms,
+            substantial_countries)
 
 
 def _neighbour_index(occurrences, term_countries):
@@ -447,10 +462,43 @@ def _other_country_evidence(term, own_countries, occurrences, term_countries):
     return False
 
 
+def _touching_occurrences(all_occurrences):
+    """Index the occurrences that touch a Han name without a separator."""
+    starts_at: dict[int, list[_Occurrence]] = {}
+    ends_at: dict[int, list[_Occurrence]] = {}
+    for occurrence in all_occurrences:
+        starts_at.setdefault(occurrence.start, []).append(occurrence)
+        ends_at.setdefault(occurrence.end, []).append(occurrence)
+    return starts_at, ends_at
+
+
+def _han_brand(occurrence, touching, term_countries, sovereign_terms,
+               own_countries) -> bool:
+    """True when a Han country name modifies a place of another country.
+
+    Chinese writes a country name and a foreign place name without any
+    separator, so "中国東京" is as much a brand as "China Mobile" is in
+    Latin. A country name next to another country stays a conflict.
+    """
+    starts_at, ends_at = touching
+    neighbours = list(starts_at.get(occurrence.end, ()))
+    neighbours.extend(ends_at.get(occurrence.start, ()))
+    for neighbour in neighbours:
+        if neighbour is occurrence:
+            continue
+        countries = term_countries.get(neighbour.term)
+        if not countries or (countries & own_countries):
+            continue
+        if neighbour.term in sovereign_terms:
+            continue
+        return True
+    return False
+
+
 def _mark_brand_country_entities(scope, occurrences, contexts, term_countries,
                                  entity_countries, sovereign_terms,
                                  end_countries, start_countries, end_terms,
-                                 start_terms) -> None:
+                                 start_terms, all_occurrences) -> None:
     """Withdraw a country name that only modifies a foreign place name.
 
     "China Mobile" is a company name, not an address in China. The country
@@ -460,6 +508,7 @@ def _mark_brand_country_entities(scope, occurrences, contexts, term_countries,
     name next to another country is a conflict, not a brand, and is left to
     the explicit-conflict policy.
     """
+    touching = _touching_occurrences(all_occurrences)
     for term, uses in occurrences.items():
         own_countries = entity_countries.get(term)
         if not own_countries:
@@ -469,6 +518,11 @@ def _mark_brand_country_entities(scope, occurrences, contexts, term_countries,
                 continue
             if _other_country_evidence(term, own_countries, occurrences,
                                        term_countries):
+                continue
+            if use.han:
+                if _han_brand(use, touching, term_countries, sovereign_terms,
+                              own_countries):
+                    use.company = True
                 continue
             left_edge, right_edge = _occurrence_edges(use, scope, contexts)
             for edge, table, terms_table in ((left_edge, end_countries, end_terms),
@@ -673,21 +727,29 @@ def classify_record(record: AddressRecord, geo_db: Path, hkp_db: Path,
         return result('REVIEW_AMBIGUOUS', reason='GEOGRAPHIC_OCCURRENCE_LIMIT')
     if any(not occurrences[term] for candidate in candidates for term, _ in candidate.term_support):
         return result('REVIEW_AMBIGUOUS', reason='UNLOCATABLE_GEOGRAPHIC_TERM')
-    term_countries, entity_countries, sovereign_terms = _country_maps(candidates)
+    (term_countries, entity_countries, sovereign_terms,
+     substantial_countries) = _country_maps(candidates)
     (end_countries, start_countries,
      end_terms, start_terms) = _neighbour_index(occurrences, term_countries)
+    (substantial_end_countries, substantial_start_countries,
+     _settled_end_terms, _settled_start_terms) = _neighbour_index(
+         occurrences, substantial_countries)
     _refine_occurrence_context(scope, candidates, occurrences, contexts,
-                               end_countries, start_countries, entity_countries)
+                               substantial_end_countries, substantial_start_countries,
+                               entity_countries)
     _mark_brand_country_entities(scope, occurrences, contexts, term_countries,
                                  entity_countries, sovereign_terms,
                                  end_countries, start_countries, end_terms,
-                                 start_terms)
+                                 start_terms,
+                                 [use for uses in occurrences.values()
+                                  for use in uses])
     # A longer geographic name owns only its own span. Weight is irrelevant
     # for ordinary localities, but a country entity spelling that resolves to
     # the same country is an alternate official name and does not hide that
     # country's short name.
     country_entity_owners: dict[str, set[str]] = {}
     country_entity_codes: dict[str, set[str]] = {}
+    country_entity_weights: dict[str, float] = {}
     terms_by_iso: dict[str, set[str]] = {}
     for candidate in candidates:
         terms_by_iso.setdefault(candidate.destination_id, set()).update(
@@ -697,6 +759,10 @@ def classify_record(record: AddressRecord, geo_db: Path, hkp_db: Path,
         for term in candidate.entity_terms:
             country_entity_owners.setdefault(term, set()).add(
                 candidate.destination_id)
+            for name, weight in candidate.term_support:
+                if name == term:
+                    country_entity_weights[term] = max(
+                        country_entity_weights.get(term, 0.0), weight)
     country_entity_terms = set(country_entity_owners)
     dependent_entity_terms = {
         term for term, codes in country_entity_codes.items()
@@ -721,6 +787,13 @@ def classify_record(record: AddressRecord, geo_db: Path, hkp_db: Path,
             if term in candidate.entity_terms or not (independent_terms - {term}):
                 continue
             if weight < MIN_SUPPORT:
+                continue
+            # A village that merely shares a country name may only displace
+            # that country when its own destination is at least as strong as
+            # the country entity. Otherwise the country reading stands and
+            # the rival becomes an explicit review instead of a silent
+            # match on the wrong country.
+            if candidate.support < country_entity_weights.get(term, 0.0):
                 continue
             # The local place itself must be substantial. Two tiny same-spelled
             # villages must not erase a country.

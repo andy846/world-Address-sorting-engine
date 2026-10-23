@@ -328,6 +328,14 @@ def _prominence(population: int) -> float:
     return min(1.0, math.log10(population + 1) / POPULATION_SCALE)
 
 
+# A neighbouring name is geographic context of its own country only when it
+# names a settlement of at least this many inhabitants. A hamlet of a few
+# hundred people is as likely to be an ordinary word that happens to be a
+# place name -- "Target" is a commune in France -- and treating it as
+# context would turn brand text into an asserted destination.
+PLACE_CONTEXT_MIN_POPULATION = 1000
+
+
 def _row_weight(feature_class: str, feature_code: str, admin1_code: str, population: int) -> float:
     """Weight of a single gazetteer row."""
     if feature_class == "A":
@@ -339,6 +347,11 @@ def _row_weight(feature_class: str, feature_code: str, admin1_code: str, populat
             return ADMIN2_WEIGHT
         return ADMIN_DEEP_WEIGHT
     return POPULATED_WEIGHT * _prominence(population)
+
+
+# The evidence mass of a settlement of PLACE_CONTEXT_MIN_POPULATION people.
+PLACE_CONTEXT_MIN_WEIGHT = POPULATED_WEIGHT * _prominence(
+    PLACE_CONTEXT_MIN_POPULATION)
 
 
 def _chunked(items: list[str], size: int):
