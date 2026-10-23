@@ -33,6 +33,7 @@ from gui_entry_point import (
 REPO_ROOT = Path(__file__).resolve().parents[1]
 APP_NAME = 'WorldAddressEngine'
 ENTRY_POINT = REPO_ROOT / 'tools' / 'gui_entry_point.py'
+APP_ICON = REPO_ROOT / 'src' / 'world_address_engine' / 'resources' / 'wase.ico'
 
 
 def project_version() -> str:
@@ -72,6 +73,7 @@ def build(output: Path, *, onefile: bool = True) -> Path:
         '--workpath', str(work),
         '--specpath', str(work),
         '--windowed',
+        '--icon', str(APP_ICON),
         '--onefile' if onefile else '--onedir',
         '--copy-metadata', DISTRIBUTION,
         '--collect-data', 'opencc',

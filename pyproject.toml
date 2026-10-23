@@ -23,7 +23,7 @@ test = ["pytest>=8,<10"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-"world_address_engine.resources" = ["*.json"]
+"world_address_engine.resources" = ["*.json", "*.svg", "*.ico"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

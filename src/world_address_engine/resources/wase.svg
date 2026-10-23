@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>World Address Engine</title>
+  <desc>A teal globe on deep blue, with an amber route leading to an address pin.</desc>
+  <circle cx="112" cy="112" r="102" fill="#12364b"/>
+  <g fill="none" stroke="#4ec6c0" stroke-width="12">
+    <circle cx="112" cy="112" r="88"/>
+    <ellipse cx="112" cy="112" rx="40" ry="88"/>
+    <path d="M24 112h176"/>
+  </g>
+  <path d="M60 152h40q16 0 16 16v4q0 12 12 12h42"
+        fill="none" stroke="#f5b544" stroke-width="14" stroke-linecap="round"/>
+  <circle cx="60" cy="152" r="10" fill="#f5b544"/>
+  <path d="M190 238c-13-17-44-49-44-73a44 44 0 0 1 88 0c0 24-31 56-44 73Z"
+        fill="#f5b544" stroke="#12364b" stroke-width="10" stroke-linejoin="round"/>
+  <circle cx="190" cy="165" r="14" fill="#12364b"/>
+</svg>
