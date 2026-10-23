@@ -288,3 +288,34 @@ def test_the_column_reader_honours_the_selected_encoding(tmp_path, app):
               for i in range(window.address_columns.count())]
     assert labels == ['NAME_ADDRESS_LINE1', 'NAME_ADDRESS_LINE2']
     window.close()
+
+
+def test_completed_worker_does_not_keep_a_closed_window_alive(app):
+    """A later worker must not collect an earlier window's callback cycle."""
+    import gc
+    import weakref
+
+    from world_address_engine.gui.app import MainWindow
+
+    collecting = gc.isenabled()
+    gc.disable()
+    try:
+        window = MainWindow()
+        assert window._start_worker(
+            lambda _emit: 1,
+            on_success=window._on_progress,
+            on_error=window._on_background_error,
+            on_finished=window._load_approved_codes,
+        )
+        assert _wait_for_idle(window, app)
+        app.processEvents()
+        window.close()
+        reference = weakref.ref(window)
+        del window
+        app.processEvents()
+        assert reference() is None, 'completed callbacks retain the closed window'
+    finally:
+        # Qt wrappers must be reclaimed on their owning GUI thread.
+        gc.collect()
+        if collecting:
+            gc.enable()

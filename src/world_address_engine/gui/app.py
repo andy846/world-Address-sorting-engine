@@ -417,6 +417,10 @@ class MainWindow(QMainWindow):
     @Slot()
     def _on_worker_finished(self):
         callback = self._on_finished
+        # Bound callbacks otherwise retain the closed window in a cycle,
+        # which a later worker can collect away from the GUI thread.
+        self._on_success = None
+        self._on_error = None
         self._on_finished = None
         if callback is not None:
             callback()
