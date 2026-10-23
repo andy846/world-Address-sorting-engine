@@ -15,6 +15,10 @@ on:
         default: ''
         type: string
 
+# A workflow_dispatch entry point is only registered once this file is on the
+# repository's default branch. The feature branch therefore uses an explicit
+# commit-message marker for the same deliberate publication gate.
+
 permissions:
   contents: read
 
@@ -43,7 +47,7 @@ jobs:
           python-version: "3.13"
 
       - name: Verify the release branch
-        run: test "${GITHUB_REF_NAME}" = "feat/hkp-trilingual-phase1"
+        run: test "${GITHUB_REF}" = "refs/heads/feat/hkp-trilingual-phase1"
 
       - name: Install development and release dependencies
         run: python -m pip install -e ".[excel,test]"
@@ -93,6 +97,12 @@ jobs:
             builds/real-2026-10-22/compact/compact_global.sqlite
           ln builds/real-2026-10-23/pack/extended_global.sqlite \
             builds/real-2026-10-22/extended/extended_global.sqlite
+          printf '%s  %s\n' \
+            "f4ef044e94aa3d206f8fce1fa3e0d7ab5f03d6081d142fd7f9e8cf5837ab1b3f" \
+            "builds/real-2026-10-23/pack/compact_global.sqlite" | sha256sum -c -
+          printf '%s  %s\n' \
+            "70d617a532b8faedd7d9703c9b952945f101334907df5936725123d20be1f70f" \
+            "builds/real-2026-10-23/pack/extended_global.sqlite" | sha256sum -c -
           python tools/install_reference_pack.py \
             --database builds/real-2026-10-23/pack/compact_global.sqlite \
             --manifest downloaded-packs/compact_global.manifest.json \
@@ -150,7 +160,7 @@ jobs:
       - name: Verify the release branch
         shell: pwsh
         run: |
-          if ($env:GITHUB_REF_NAME -ne "feat/hkp-trilingual-phase1") {
+          if ($env:GITHUB_REF -ne "refs/heads/feat/hkp-trilingual-phase1") {
             throw "Release verification must run on feat/hkp-trilingual-phase1"
           }
 
@@ -188,7 +198,13 @@ jobs:
     needs:
       - verify-linux
       - verify-windows
-    if: github.event_name == 'workflow_dispatch' && inputs.confirm_publish == 'PUBLISH v0.1.0-alpha.1'
+    if: |
+      (github.event_name == 'workflow_dispatch' &&
+       inputs.confirm_publish == 'PUBLISH v0.1.0-alpha.1') ||
+      (github.event_name == 'push' &&
+       contains(github.event.head_commit.message, '[publish-alpha1]'))
+    environment:
+      name: alpha-release
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -199,6 +215,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      - name: Require the intended branch and explicit publication intent
+        run: |
+          test "$GITHUB_REF" = "refs/heads/feat/hkp-trilingual-phase1"
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            test "$(git log -1 --format=%s)" = \
+              "chore(release): publish v0.1.0-alpha.1 [publish-alpha1]"
+          fi
 
       - name: Download verified application artifacts
         uses: actions/download-artifact@v4
@@ -214,25 +238,49 @@ jobs:
         run: |
           TAG="v0.1.0-alpha.1"
           if gh api "repos/$GH_REPO/git/ref/tags/$TAG" >/dev/null 2>&1; then
-            echo "::error::Tag $TAG already exists; immutable releases are never overwritten"
+            echo "::error::Tag $TAG already exists; existing versions are never overwritten"
             exit 1
           fi
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "::error::Release $TAG already exists; immutable releases are never overwritten"
+            echo "::error::Release $TAG already exists; existing versions are never overwritten"
             exit 1
           fi
 
-      - name: Validate the application asset set
+      - name: Refuse to continue unless alpha.0 remains intact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          test "$(find release-assets -maxdepth 1 -name '*.whl' | wc -l)" -eq 1
-          test -f release-assets/WorldAddressEngine.exe
-          if find release-assets -maxdepth 1 \( -name '*.sqlite' -o -name '*.db' \
-              -o -name '*.sqlite.zip' -o -name '*.db.zip' \) | grep -q .; then
-            echo "::error::Reference databases must not be attached to the application release"
-            exit 1
-          fi
-          grep -q "TEST ONLY" docs/releases/v0.1.0-alpha.1.md
-          grep -q "NOT FOR PRODUCTION" docs/releases/v0.1.0-alpha.1.md
+          set -euo pipefail
+          ALPHA0_TAG="v0.1.0-alpha.0"
+          test "$(gh api "repos/$GH_REPO/git/ref/tags/$ALPHA0_TAG" \
+            --jq '.object.sha')" = \
+            "41497d682207c945a1fb54fcb8d4d9155cbdad7f"
+          gh release view "$ALPHA0_TAG" \
+            --json tagName,isDraft,isPrerelease,targetCommitish,assets > alpha0-release.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("alpha0-release.json").read_text("utf-8"))
+          assets = {asset["name"]: asset["size"] for asset in payload["assets"]}
+          wheels = {name for name in assets if name.endswith(".whl")}
+          assert payload["tagName"] == "v0.1.0-alpha.0"
+          assert payload["isDraft"] is False
+          assert payload["isPrerelease"] is True
+          assert len(wheels) == 1
+          assert set(assets) == wheels | {"SHA256SUMS.txt"}
+          assert assets[next(iter(wheels))] == 26283
+          assert assets["SHA256SUMS.txt"] == 122
+          assert payload["targetCommitish"] == "41497d682207c945a1fb54fcb8d4d9155cbdad7f"
+          expected_digests = {
+              "world_address_sorting_engine-0.1.0a0-py3-none-any.whl":
+                  "sha256:6f4fbc2db125be5294781d6d2cdf697fad104ab7219e2d1234c05dc38b38e40b",
+              "SHA256SUMS.txt":
+                  "sha256:e71aa553e5349952a6853594629c45cfe11384ba309057c1f6537b42211c858d",
+          }
+          assert {asset["name"]: asset["digest"] for asset in payload["assets"]} == expected_digests
+          PY
 
       - name: Record application asset checksums
         run: |
@@ -241,55 +289,111 @@ jobs:
           sha256sum -c SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-      - name: Publish the draft TEST ONLY pre-release
+      - name: Validate exact assets and reject embedded reference databases
+        run: |
+          python - <<'PY'
+          import hashlib
+          import re
+          import zipfile
+          from pathlib import Path
+
+          root = Path("release-assets")
+          files = {path.name: path for path in root.iterdir() if path.is_file()}
+          wheels = {name for name in files if name.endswith(".whl")}
+          assert len(wheels) == 1, wheels
+          expected_names = wheels | {"WorldAddressEngine.exe", "SHA256SUMS.txt"}
+          assert set(files) == expected_names, sorted(files)
+
+          lines = (root / "SHA256SUMS.txt").read_text("utf-8").splitlines()
+          assert len(lines) == 2, lines
+          entries = {}
+          for line in lines:
+              digest, name = line.split(maxsplit=1)
+              name = Path(name.strip().lstrip("*")).name
+              assert re.fullmatch(r"[0-9a-f]{64}", digest), digest
+              entries[name] = digest
+          assert set(entries) == expected_names - {"SHA256SUMS.txt"}, entries
+          for name, digest in entries.items():
+              assert hashlib.sha256(files[name].read_bytes()).hexdigest() == digest
+
+          def reject_sqlite(blob: bytes) -> None:
+              assert b"SQLite format 3\x00" not in blob, "SQLite payload found"
+
+          with zipfile.ZipFile(files[next(iter(wheels))]) as archive:
+              for info in archive.infolist():
+                  lower = info.filename.lower()
+                  assert not lower.endswith(
+                      (".sqlite", ".db", ".sqlite3", ".sqlite.zip", ".db.zip")
+                  ), info.filename
+                  if info.file_size:
+                      with archive.open(info) as stream:
+                          reject_sqlite(stream.read(16))
+          reject_sqlite(files["WorldAddressEngine.exe"].read_bytes())
+
+          notes = Path("docs/releases/v0.1.0-alpha.1.md").read_text("utf-8")
+          assert "TEST ONLY" in notes
+          assert "NOT FOR PRODUCTION" in notes
+          print("Validated exact assets:", ", ".join(sorted(files)))
+          PY
+
+      - name: Create the draft TEST ONLY pre-release and record its ID
         id: publish_draft
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          TAG="v0.1.0-alpha.1"
-          gh release create "$TAG" \
-            release-assets/*.whl \
-            release-assets/WorldAddressEngine.exe \
-            release-assets/SHA256SUMS.txt \
-            --target "$GITHUB_SHA" \
-            --title "v0.1.0-alpha.1 - TEST ONLY Developer Preview (NOT FOR PRODUCTION)" \
-            --notes-file docs/releases/v0.1.0-alpha.1.md \
-            --prerelease \
-            --draft \
-            --latest=false
+          gh api --method POST "repos/$GH_REPO/releases" \
+            -f tag_name="v0.1.0-alpha.1" \
+            -f target_commitish="$GITHUB_SHA" \
+            -f name="v0.1.0-alpha.1 - TEST ONLY Developer Preview (NOT FOR PRODUCTION)" \
+            -F body=@docs/releases/v0.1.0-alpha.1.md \
+            -F prerelease=true -F draft=true -f make_latest=false \
+            > created-release.json
+          RELEASE_ID="$(jq -er '.id' created-release.json)"
+          echo "release_id=$RELEASE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Upload only the verified application assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release upload "v0.1.0-alpha.1" \
+            release-assets/*.whl release-assets/WorldAddressEngine.exe \
+            release-assets/SHA256SUMS.txt
 
       - name: Verify the draft asset manifest before publication
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ steps.publish_draft.outputs.release_id }}
         run: |
           set -euo pipefail
           TAG="v0.1.0-alpha.1"
           gh release view "$TAG" --json tagName,isDraft,isPrerelease,assets > draft-release.json
+          gh api "repos/$GH_REPO/releases/$RELEASE_ID" > draft-release-api.json
           python - <<'PY'
           import json
+          import os
           from pathlib import Path
 
           payload = json.loads(Path("draft-release.json").read_text("utf-8"))
+          api = json.loads(Path("draft-release-api.json").read_text("utf-8"))
           names = {asset["name"] for asset in payload["assets"]}
           wheels = {name for name in names if name.endswith(".whl")}
           assert payload["tagName"] == "v0.1.0-alpha.1"
           assert payload["isDraft"] is True
           assert payload["isPrerelease"] is True
           assert len(wheels) == 1
-          assert {"WorldAddressEngine.exe", "SHA256SUMS.txt"} <= names
-          assert not any(
-              name.endswith((".sqlite", ".db", ".sqlite.zip", ".db.zip"))
-              for name in names
-          )
+          assert names == wheels | {"WorldAddressEngine.exe", "SHA256SUMS.txt"}
+          assert api["target_commitish"] == os.environ["GITHUB_SHA"]
           print("Published assets:", ", ".join(sorted(names)))
           PY
           gh release download "$TAG" --dir verify-draft --clobber
+          cmp release-assets/SHA256SUMS.txt verify-draft/SHA256SUMS.txt
           (cd verify-draft && sha256sum -c SHA256SUMS.txt)
 
-      - name: Publish the immutable TEST ONLY pre-release
+      - name: Publish the overwrite-guarded TEST ONLY pre-release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -317,23 +421,35 @@ jobs:
           assert payload["isDraft"] is False
           assert payload["isPrerelease"] is True
           assert len(wheels) == 1
-          assert {"WorldAddressEngine.exe", "SHA256SUMS.txt"} <= names
-          assert not any(
-              name.endswith((".sqlite", ".db", ".sqlite.zip", ".db.zip"))
-              for name in names
-          )
+          assert names == wheels | {"WorldAddressEngine.exe", "SHA256SUMS.txt"}
           print("Published assets:", ", ".join(sorted(names)))
           PY
           gh release download "$TAG" --dir verify-published --clobber
+          cmp release-assets/SHA256SUMS.txt verify-published/SHA256SUMS.txt
           (cd verify-published && sha256sum -c SHA256SUMS.txt)
 
-      - name: Remove a failed draft release
-        if: failure() && steps.publish_draft.outcome == 'success'
+      - name: Verify the published tag points at the verified commit
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          set -euo pipefail
           TAG="v0.1.0-alpha.1"
-          if gh release view "$TAG" --json isDraft --jq '.isDraft' 2>/dev/null | grep -qx true; then
-            gh release delete "$TAG" --yes --cleanup-tag
+          REF_TYPE="$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq '.object.type')"
+          REF_SHA="$(gh api "repos/$GH_REPO/git/ref/tags/$TAG" --jq '.object.sha')"
+          if [ "$REF_TYPE" = "tag" ]; then
+            REF_SHA="$(gh api "repos/$GH_REPO/git/tags/$REF_SHA" --jq '.object.sha')"
           fi
+          test "$REF_SHA" = "$GITHUB_SHA"
+
+      - name: Keep a failed or cancelled publication as an unpublished draft
+        if: always() && !success() && steps.publish_draft.outputs.release_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_ID: ${{ steps.publish_draft.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GH_REPO/releases/$RELEASE_ID" --jq '.target_commitish')" = "$GITHUB_SHA"
+          gh api --method PATCH "repos/$GH_REPO/releases/$RELEASE_ID" -F draft=true
+          echo "::error::Publication failed; retained draft release $RELEASE_ID for inspection"
