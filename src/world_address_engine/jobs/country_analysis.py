@@ -9,7 +9,7 @@ import shutil
 from world_address_engine.data.country_codes import load_country_codes
 from world_address_engine.data.pack_registry import require_readable_pack
 from world_address_engine.io.country_reports import _private_directory, write_country_reports
-from world_address_engine.io.delimited import _header_names, iter_csv_records, iter_txt_records
+from world_address_engine.io.delimited import _header_names, _record, iter_csv_records, iter_txt_records
 from world_address_engine.jobs.checkpoint import (
     CHUNK_PATTERN, HEADER_KEY, atomic_json, commit_batch, committed_shards, file_sha256,
 )
@@ -68,11 +68,30 @@ def _original_columns(path: Path, options: dict) -> list[str]:
         from openpyxl import load_workbook
         book = load_workbook(path, read_only=True, data_only=True)
         try:
+            if options['sheet_name'] not in book.sheetnames:
+                raise ValueError(f"worksheet not found: {options['sheet_name']}")
             headers = next(book[options['sheet_name']].iter_rows(values_only=True), ())
             return _header_names(['' if value is None else str(value) for value in headers])
         finally:
             book.close()
     return []
+
+
+def _preflight_input(path: Path, options: dict) -> None:
+    """Validate mappings even without data rows, without consuming the job stream."""
+    if path.suffix.lower() in ('.csv', '.xlsx'):
+        if path.suffix.lower() == '.xlsx' and not options['sheet_name']:
+            raise ValueError('Excel input requires sheet_name')
+        headers = _original_columns(path, options)
+        if not headers:
+            raise ValueError('input has no header')
+        # The readers share this mapping validation, but invoke it only per row.
+        _record(1, path, dict.fromkeys(headers, ''), tuple(options['address_columns']),
+                options['record_id_column'])
+    else:
+        # TXT option checks are lazy; advance once and always close the probe.
+        with closing(_records(path, options)) as records:
+            next(records, None)
 
 
 def _pack_metadata(geo_db: Path, geo_digest: str) -> dict:
@@ -294,6 +313,7 @@ def analyze_job(input_path, output_dir, geo_db, input_options: dict | None = Non
         if not path.is_file():
             raise FileNotFoundError(path)
     input_path, geo_db = input_path.resolve(), geo_db.resolve()
+    _preflight_input(input_path, options)
     catalogue_path = Path(catalogue_path).resolve() if catalogue_path is not None else None
     catalogue = load_country_codes(catalogue_path)
     geo_digest = file_sha256(geo_db)
@@ -304,8 +324,6 @@ def analyze_job(input_path, output_dir, geo_db, input_options: dict | None = Non
            'input_sha256': file_sha256(input_path), 'geo_sha256': geo_digest,
            'input_options': options, 'input_options_sha256': _json_hash(options),
            **_pack_metadata(geo_db, geo_digest), **_catalogue_metadata(catalogue)}
-    # Validate the format before retaining any plaintext state.
-    _records(input_path, options).close()
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
         raise FileExistsError('existing country analysis output')

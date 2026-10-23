@@ -145,9 +145,15 @@ class CountryAnalysisWindow(QMainWindow):
         form.addRow('Worksheet', self.sheet_name)
         self.address_columns = QListWidget()
         self.address_columns.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
-        self.address_columns.setMaximumHeight(85)
+        self.address_columns.setMinimumHeight(110)
+        self.address_columns.setMaximumHeight(160)
         self.input_path.textChanged.connect(self.address_columns.clear)
         form.addRow('Address columns', self.address_columns)
+        self.column_selection = QLabel()
+        self.column_selection.setWordWrap(True)
+        self.address_columns.itemSelectionChanged.connect(self._update_column_selection)
+        self._update_column_selection()
+        form.addRow('', self.column_selection)
         form.addRow(QLabel('Country catalogue: packaged catalogue (automatic)'))
         layout.addWidget(self.inputs)
 
@@ -221,6 +227,12 @@ class CountryAnalysisWindow(QMainWindow):
         return {'encoding': self.encoding.currentText(),
                 'sheet_name': self.sheet_name.text().strip() or None,
                 'address_columns': [item.text() for item in self.address_columns.selectedItems()]}
+
+    def _update_column_selection(self) -> None:
+        count = len(self.address_columns.selectedItems())
+        self.column_selection.setText(
+            f'{count} address columns selected. Click each address field to toggle selection; '
+            'select all address lines, not page numbers or IDs.')
 
     def _notify(self, title: str, message: str) -> None:
         self.log.append(f'{title}: {message}')
@@ -303,6 +315,7 @@ class CountryAnalysisWindow(QMainWindow):
     def _operation_failed(self, message: str) -> None:
         self._last_error = message
         self._job_state = 'failed'
+        self.summary.setText('Operation failed. See the error message below.')
         self._notify('Operation failed', message)
         self.jobFailed.emit(message)
 
@@ -339,12 +352,13 @@ class CountryAnalysisWindow(QMainWindow):
         preview = payload['preview']
         if preview is None:
             self.preview_summary.setText('Columns loaded. Select address columns, then preview again.')
+            self.statusBar().showMessage('Select address columns before analyzing this input.')
         else:
             self.preview_summary.setText(
                 f"Preview: {preview['total_records']:,} records; "
                 f"{preview['empty_addresses']:,} empty addresses; "
                 f"{preview['records_with_decoding_errors']:,} records with decoding errors.")
-        self.statusBar().showMessage('Preview ready. No classification was run.')
+            self.statusBar().showMessage('Preview ready. No classification was run.')
 
     def start_job(self) -> None:
         if self.busy or self._closing:
@@ -358,9 +372,26 @@ class CountryAnalysisWindow(QMainWindow):
             self._notify('Missing GeoNames pack', 'Choose an installed GeoNames pack first.')
             return
         source = Path(source_text)
+        options = self._input_options()
+        if not options['address_columns']:
+            self.summary.setText('Analysis not started. Select address columns first.')
+            self._notify('Select address columns',
+                         'Click Preview / load columns, then click each address field to select it. '
+                         'Displayed column names are not automatically selected.')
+            return
         chosen = self.output_dir.text().strip()
         output = Path(chosen) if chosen else source.parent / f'{source.stem}-country-analysis'
-        options = self._input_options()
+        try:
+            occupied = output.exists() and (not output.is_dir() or next(output.iterdir(), None) is not None)
+        except OSError as exc:
+            self._operation_failed(f'Cannot inspect output folder: {exc}')
+            return
+        if occupied:
+            self.summary.setText('Analysis not started. Choose a different empty output folder.')
+            self._notify('Output folder is not empty',
+                         'Existing files were not changed. Choose a new empty folder for a new analysis. '
+                         'Use Resume only to continue the original run with its saved settings.')
+            return
         geo_db = Path(geo_text)
         cancel = self._cancel
 

@@ -414,6 +414,90 @@ def test_runner_failure_restores_controls_and_releases_thread(window, tmp_path, 
     assert window.run_button.isEnabled()
     assert not window.cancel_button.isEnabled()
     assert window.worker_thread not in _LIVE_THREADS
+    assert 'running' not in window.summary.text().lower()
+    assert 'failed' in window.summary.text().lower()
+
+
+def test_no_selected_address_columns_does_not_start_a_job(window, tmp_path, monkeypatch):
+    configure(window, tmp_path)
+    window.address_columns.clearSelection()
+    calls = []
+    install_runner(monkeypatch, lambda *args, **kwargs: calls.append(True))
+    window.start_job()
+    assert not window.busy
+    assert not calls
+    assert not (tmp_path / 'export').exists()
+    assert 'select' in window.statusBar().currentMessage().lower()
+    assert 'running' not in window.summary.text().lower()
+
+
+def test_nonempty_output_is_explained_before_start_without_changing_files(
+        window, tmp_path, monkeypatch):
+    configure(window, tmp_path)
+    output = tmp_path / 'export'
+    output.mkdir()
+    marker = output / 'existing.txt'
+    marker.write_text('preserve this', encoding='utf-8')
+    calls = []
+    install_runner(monkeypatch, lambda *args, **kwargs: calls.append(True))
+    window.start_job()
+    assert not window.busy
+    assert not calls
+    assert marker.read_text(encoding='utf-8') == 'preserve this'
+    assert list(output.iterdir()) == [marker]
+    assert 'empty' in window.statusBar().currentMessage().lower()
+    assert 'running' not in window.summary.text().lower()
+
+
+def test_address_selection_count_makes_multiple_selection_visible(window, tmp_path):
+    configure(window, tmp_path)
+    assert '1' in window.column_selection.text()
+    window.address_columns.addItem('Other address field')
+    window.address_columns.item(1).setSelected(True)
+    assert '2' in window.column_selection.text()
+    window.address_columns.clearSelection()
+    assert '0' in window.column_selection.text()
+
+
+def test_extracted_xlsx_requires_explicit_fields_then_runs_without_page_column(
+        window, tmp_path, app):
+    import csv
+    from openpyxl import Workbook
+    from tests.unit.test_retrieve import geo
+
+    path = tmp_path / 'synthetic-extracted.xlsx'
+    book = Workbook()
+    sheet = book.active
+    sheet.title = 'Extracted Text'
+    sheet.append(['Page', *[f'Field {i}' for i in range(1, 7)]])
+    sheet.append([1, 'Example Person', 'Flat 12', 'Example Tower', '12 Example Road', 'TST', 'HK'])
+    book.save(path)
+    book.close()
+    output = tmp_path / 'xlsx-result'
+    window.input_path.setText(str(path))
+    window.output_dir.setText(str(output))
+    window.geo_db.setText(str(geo(tmp_path)))
+    window.preview_input()
+    wait(app, lambda: not window.busy)
+    assert not window.address_columns.selectedItems()
+    window.start_job()
+    assert not window.busy
+    assert not output.exists()
+    for i in range(window.address_columns.count()):
+        item = window.address_columns.item(i)
+        item.setSelected(item.text().startswith('Field '))
+    assert len(window.address_columns.selectedItems()) == 6
+    window.preview_input()
+    wait(app, lambda: not window.busy)
+    assert len(window.address_columns.selectedItems()) == 6
+    assert 'Preview: 1 records' in window.preview_summary.text()
+    window.start_job()
+    wait(app, lambda: not window.busy)
+    assert window.job_state == 'done', window.log.toPlainText()
+    with (output / 'Classified_Addresses.csv').open(encoding='utf-8-sig', newline='') as stream:
+        row = next(csv.DictReader(stream))
+    assert row['Page'] == '1'
+    assert row['Country_Code'] == 'HK'
 
 
 def test_close_cancels_without_blocking_or_destroying_running_thread(window, app):
