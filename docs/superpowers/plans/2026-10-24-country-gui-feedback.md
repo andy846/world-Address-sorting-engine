@@ -1,6 +1,6 @@
 # Country GUI Feedback Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Provide a recognizable Windows app, honest live progress and a usable completion/case-review view.
 
@@ -30,35 +30,35 @@
 
 **Files:** jobs/country_analysis.py; new tests/integration/test_country_progress.py.
 **Interfaces:** analyze_job/resume_analysis gain optional on_event(dict); events use stage, processed, committed, total (optional), status_counts (optional).
-- [ ] Add failing synthetic tests for stage order, early progress, legacy callbacks, verification/export and cancellation/resume.
-- [ ] Add throttled stage events without changing checkpoint or classifier contracts.
-- [ ] Run runner/preflight/progress tests, independently review and commit.
+- [x] Add failing synthetic tests for stage order, early progress, legacy callbacks, verification/export and cancellation/resume.
+- [x] Add throttled stage events without changing checkpoint or classifier contracts.
+- [x] Run runner/preflight/progress tests, independently review and commit.
 
 ### Task 2: Icon and packaging
 
 **Files:** resources/wase.svg and wase.ico, gui/branding.py, tools/package_windows.py, pyproject.toml, tests/integration/test_branding.py.
 **Interfaces:** apply_branding(window) sets window/app icon and Windows taskbar identity; packaging includes actual ICO.
-- [ ] Add failing resource/runtime/package argument tests.
-- [ ] Create original globe/routing art and multiresolution ICO; integrate wheel and frozen resources.
-- [ ] Test resource loading from unrelated working directories and review packaging diff.
+- [x] Add failing resource/runtime/package argument tests.
+- [x] Create original globe/routing art and multiresolution ICO; integrate wheel and frozen resources.
+- [x] Test resource loading from unrelated working directories and review packaging diff.
 
 ### Task 3: Streaming case review
 
 **Files:** gui/country_cases.py and gui/country_results.py; new unit/integration tests.
 **Interfaces:** load_case_page(output, mode='pending', after_record=0, limit=100, address_columns=(), cancel_requested=None) returns rows/has_next/cursor; export_cases streams all matching rows into a new CSV. CountryResultsPanel handles read-only rendering and emits page/export requests.
-- [ ] Write failing filter/page/empty/malformed/multiline/formula/export-no-overwrite tests.
-- [ ] Implement bounded positional report pairing and atomic exclusive exports.
-- [ ] Test Qt panel metrics, filters, navigation, no-results and disabled states.
-- [ ] Commit tested report reader and panel.
+- [x] Write failing filter/page/empty/malformed/multiline/formula/export-no-overwrite tests.
+- [x] Implement bounded positional report pairing and atomic exclusive exports.
+- [x] Test Qt panel metrics, filters, navigation, no-results and disabled states.
+- [x] Commit tested report reader and panel.
 
 ### Task 4: Window integration and validation
 
 **Files:** gui/country_app.py, gui/app.py (worker signal), tests/integration/test_country_gui.py, tools/gui_entry_point.py (bundle validation).
-- [ ] Add failing stage/timer/summary/pending worker/paused/cancelled/stale-state tests.
-- [ ] Integrate detailed worker signal, timer, stage display, results tabs and asynchronous case actions; keep existing counts/summary contracts.
-- [ ] Run focused suites then full pytest with real k2 packs/slow checks; inspect synthetic UI image.
-- [ ] Build separate local EXE and pass frozen self-test; open for user testing.
-- [ ] Independent whole-change review, address actionable findings, record measured results and remaining gates; commit/push existing draft PR only.
+- [x] Add failing stage/timer/summary/pending worker/paused/cancelled/stale-state tests.
+- [x] Integrate detailed worker signal, timer, stage display, results tabs and asynchronous case actions; keep existing counts/summary contracts.
+- [x] Run focused suites then full pytest with real k2 packs/slow checks; inspect synthetic UI image.
+- [x] Build separate local EXE and pass frozen self-test; open for user testing.
+- [x] Independent whole-change review, address actionable findings, record measured results and remaining gates; commit/push existing draft PR only.
 
 ## Execution Notes
 
@@ -66,3 +66,4 @@ Continue in D:\WASE on the existing feat/country-code-analysis branch so the
 operator's local test setup and installed packs stay usable. Do not create a
 second checkout or alter user-owned running windows. Delegate disjoint backend
 progress and branding tasks while the main worker builds case UI and integration.
+
