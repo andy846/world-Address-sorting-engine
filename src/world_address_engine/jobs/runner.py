@@ -80,23 +80,50 @@ def _geo_pack_versions(geo_db: Path) -> str:
     return 'sha256:' + file_sha256(Path(geo_db))[:16]
 
 
-def _verify_shards(paths, cfg: dict, approval) -> None:
-    """Re-derive every committed result and compare it with the shard.
+def _assert_sources_unchanged(cfg: dict) -> None:
+    """Fail if any source used by the run changed after its snapshot."""
+    for label, key_path, key_hash in (
+        ('input', 'input_path', 'input_sha256'),
+        ('geo reference pack', 'geo_db', 'geo_sha256'),
+        ('HKP reference catalogue', 'hkp_db', 'hkp_sha256'),
+    ):
+        if file_sha256(Path(cfg[key_path])) != cfg[key_hash]:
+            raise ValueError(f'{label} changed during classification; job incomplete')
+
+
+def _verified_pairs(paths, cfg: dict, approval):
+    """Yield only pairs that match both the original source and a fresh result.
 
     A shard is local, writable data. Its digest lives in its own filename,
     so a tamperer can rename a rewritten shard with a matching digest. The
     classification is deterministic, so re-running it over the committed
-    records is the only complete local defence against a forged result.
+    records is the only complete local defence against a forged result. The
+    same pass also proves that the recipient fields came from the hashed
+    source and that no source record was omitted.
     """
     geo = Path(cfg['geo_db'])
     hkp = Path(cfg['hkp_db'])
+    source = iter(_records(Path(cfg['input_path']), cfg['input_options']))
     for record, result in iter_saved_pairs(paths):
-        again = classify_record(record, geo, hkp, approval)
-        if (again.status, again.hkp_code, again.destination_id) != (
-                result.status, result.hkp_code, result.destination_id):
+        try:
+            original = next(source)
+        except StopIteration as exc:
+            raise ValueError(
+                f'checkpoint contains record {record.record_no} beyond the source'
+            ) from exc
+        if original != record:
+            raise ValueError(
+                f'checkpoint verification failed at record {record.record_no}: '
+                'the committed recipient data does not match the original source')
+        again = classify_record(original, geo, hkp, approval)
+        if again != result:
             raise ValueError(
                 f'checkpoint verification failed at record {record.record_no}: '
                 'the committed result does not match a fresh classification')
+        yield original, again
+    if next(source, None) is not None:
+        raise ValueError(
+            'checkpoint verification failed: the checkpoint omitted source records')
 
 
 def _remove_checkpoint(state: Path) -> None:
@@ -215,18 +242,9 @@ def _process(output_dir: Path, cfg: dict, *, max_batches: int | None = None,
         state, expected_rules_version=RULES_VERSION)
     # Ensure the source files have not been edited DURING this run. The
     # startup snapshot alone cannot protect against mid-job changes.
-    for label, key_path, key_hash in (
-        ('input', 'input_path', 'input_sha256'),
-        ('geo reference pack', 'geo_db', 'geo_sha256'),
-        ('HKP reference catalogue', 'hkp_db', 'hkp_sha256'),
-    ):
-        if file_sha256(Path(cfg[key_path])) != cfg[key_hash]:
-            raise ValueError(f'{label} changed during classification; job incomplete')
+    _assert_sources_unchanged(cfg)
     if output_dir.joinpath('Run_Manifest.json').exists():
         raise FileExistsError('completed job already exists')
-    # A checkpoint is local writable data. Re-derive every committed result
-    # before publication; there is no safe option to skip this final check.
-    _verify_shards(paths, cfg, approval)
     manifest_meta = {
         'production_approved': bool(
             not cfg['allow_unverified_reference_data']
@@ -250,14 +268,16 @@ def _process(output_dir: Path, cfg: dict, *, max_batches: int | None = None,
         'geo_pack_versions': _geo_pack_versions(Path(cfg['geo_db'])),
         'rules_version': RULES_VERSION,
     }
-    before_manifest = None
-    if not cfg.get('keep_checkpoint'):
-        # Delete plaintext shards after report files are staged but before
-        # publishing COMPLETE. A cleanup failure therefore leaves an
-        # incomplete run, never a completed run with retained plaintext.
-        before_manifest = lambda: _remove_checkpoint(state)
+    def before_manifest() -> None:
+        # Recheck after report staging so a source edit during export cannot
+        # publish a COMPLETE marker. Then delete plaintext shards, if allowed,
+        # before the marker becomes visible.
+        _assert_sources_unchanged(cfg)
+        if not cfg.get('keep_checkpoint'):
+            _remove_checkpoint(state)
+
     counts = write_reports(
-        iter_saved_pairs(paths), output_dir, manifest_meta,
+        _verified_pairs(paths, cfg, approval), output_dir, manifest_meta,
         code_validator=_code_validator(Path(cfg['hkp_db']), approval),
         require_validated_codes=True, before_manifest=before_manifest)
     return counts

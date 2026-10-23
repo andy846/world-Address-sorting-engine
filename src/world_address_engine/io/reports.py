@@ -46,6 +46,39 @@ def _hash(path: Path) -> str:
     return h.hexdigest()
 
 
+def _remove_staging(stage: Path) -> None:
+    """Remove plaintext staging data and prove that it is gone."""
+    stage = Path(stage)
+    if stage.exists():
+        try:
+            shutil.rmtree(stage)
+        except OSError as exc:
+            raise OSError(
+                f'staging cleanup failed; plaintext data remains at {stage}: {exc}'
+            ) from exc
+    if stage.exists():
+        raise OSError(f'staging cleanup failed; plaintext data remains at {stage}')
+
+
+def _write_manifest_atomic(output_dir: Path, manifest: dict) -> None:
+    """Publish the COMPLETE marker atomically and never overwrite one."""
+    target = output_dir / 'Run_Manifest.json'
+    if target.exists():
+        raise FileExistsError('existing completed run cannot be overwritten')
+    fd, temporary_name = tempfile.mkstemp(prefix='.pending-manifest-', dir=output_dir)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf8') as stream:
+            json.dump(manifest, stream, ensure_ascii=False, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if target.exists():
+            raise FileExistsError('existing completed run cannot be overwritten')
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def _data_class(run_metadata: dict) -> str:
     """The visible class of the export, so a test file is never mistaken
     for a production mailing list."""
@@ -152,20 +185,23 @@ def write_reports(items: Iterator[tuple[AddressRecord, ClassificationResult]],
             'export_mode':'EXCEL_SAFE_WITH_MACHINE_COPY' if machine_export else 'EXCEL_SAFE',
             'sha256':{p.name:_hash(p) for p in files},
         }
-        (stage/'Run_Manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf8')
         # Publishing manifest LAST ensures incomplete exports cannot be mistaken
         # for completed exports; an existing manifest may not be overwritten.
         if (output_dir/'Run_Manifest.json').exists():
             raise FileExistsError('existing completed run cannot be overwritten')
         for p in files: os.replace(p, output_dir/p.name)
-        # The runner uses this hook to remove plaintext checkpoints after
-        # reports are staged but before the COMPLETE marker is published.
+        # Remove the sensitive staging directory before the runner drops its
+        # plaintext checkpoint. The COMPLETE marker is published only after
+        # both cleanup steps succeed.
+        _remove_staging(stage)
+        # The runner uses this hook to recheck sources and remove checkpoints
+        # after reports are staged but before the COMPLETE marker is published.
         if before_manifest is not None:
             before_manifest()
-        os.replace(stage/'Run_Manifest.json',output_dir/'Run_Manifest.json')
+        _write_manifest_atomic(output_dir, manifest)
         return dict(status_counts)
     finally:
-        shutil.rmtree(stage,ignore_errors=True)
+        _remove_staging(stage)
 
 
 def apply_review_corrections(output_dir: Path, decisions, *,
@@ -282,4 +318,4 @@ def apply_review_corrections(output_dir: Path, decisions, *,
             manifest_path.write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
         return dict(code_counts)
     finally:
-        shutil.rmtree(stage,ignore_errors=True)
+        _remove_staging(stage)

@@ -22,6 +22,8 @@ import csv
 import hashlib
 import json
 import os
+import secrets
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -296,11 +298,37 @@ def _places_file(work: Path, places) -> Path:
     return path
 
 
+OWNERSHIP_MARKER = '.benchmark-owned'
+
+
 def _measurement_root(work: Path, kind: str, rows: int) -> Path:
-    """Create a unique owned directory without ever deleting caller data."""
+    """Create a uniquely owned directory without ever deleting caller data."""
     work = Path(work).resolve()
     work.mkdir(parents=True, exist_ok=True)
-    return Path(tempfile.mkdtemp(prefix=f'{kind}-{rows}-', dir=work))
+    root = Path(tempfile.mkdtemp(prefix=f'{kind}-{rows}-', dir=work))
+    (root / OWNERSHIP_MARKER).write_text(secrets.token_hex(32), encoding='ascii')
+    return root
+
+
+def _measurement_owner(root: Path) -> str:
+    """Read the random ownership token that this process created."""
+    marker = Path(root) / OWNERSHIP_MARKER
+    try:
+        token = marker.read_text(encoding='ascii').strip()
+    except OSError as exc:
+        raise OSError(f'benchmark ownership marker is missing: {marker}') from exc
+    if len(token) != 64 or any(character not in '0123456789abcdef' for character in token):
+        raise OSError(f'benchmark ownership marker is invalid: {marker}')
+    return token
+
+
+def _remove_owned_root(root: Path) -> None:
+    """Remove a root only when its random ownership marker is still present."""
+    root = Path(root).resolve()
+    _measurement_owner(root)
+    shutil.rmtree(root)
+    if root.exists():
+        raise OSError(f'benchmark cleanup failed; generated data remains at {root}')
 
 
 def _cleanup_measurement_inputs(work: Path, results) -> None:
@@ -309,10 +337,17 @@ def _cleanup_measurement_inputs(work: Path, results) -> None:
     for result in results:
         name = result.get('measurement_dir')
         rows = result.get('rows')
-        if not isinstance(name, str) or Path(name).name != name or not rows:
+        owner = result.get('measurement_owner')
+        if (not isinstance(name, str) or Path(name).name != name
+                or not isinstance(owner, str) or not rows):
             continue
         root = (work / name).resolve()
         if root.parent != work or not root.is_dir():
+            continue
+        try:
+            if _measurement_owner(root) != owner:
+                continue
+        except OSError:
             continue
         (root / f'input-{int(rows)}.csv').unlink(missing_ok=True)
 
@@ -339,6 +374,7 @@ def measure(rows: int, master, pack: Path, work: Path,
     })
     _require_matched(report)
     report['measurement_dir'] = root.name
+    report['measurement_owner'] = _measurement_owner(root)
     return report
 
 
@@ -423,6 +459,7 @@ def measure_resume(rows: int, master, pack: Path, work: Path,
     })
     _require_matched(report)
     report['measurement_dir'] = root.name
+    report['measurement_owner'] = _measurement_owner(root)
     return report
 
 
@@ -597,31 +634,102 @@ def _resolve_cli_paths(args) -> None:
 
 
 def git_provenance(repo_root: Path = REPO_ROOT) -> dict:
-    """Return exact commit and dirty-state provenance, or fail closed."""
-    def run(*arguments: str):
+    """Return commit, status and dirty-content provenance, or fail closed."""
+    repo_root = Path(repo_root).resolve()
+
+    def run(*arguments: str, binary: bool = False):
         try:
             return subprocess.run(
                 ['git', *arguments], cwd=Path(repo_root), capture_output=True,
-                text=True, encoding='utf-8', errors='replace', check=False,
+                text=not binary,
+                encoding=None if binary else 'utf-8',
+                errors=None if binary else 'replace',
+                check=False,
             )
         except OSError as exc:
             raise SystemExit(f'git provenance could not be obtained: {exc}') from exc
 
+    def failed_detail(result) -> str:
+        stdout = result.stdout or b''
+        stderr = result.stderr or b''
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode('utf-8', 'replace')
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode('utf-8', 'replace')
+        return (stderr or stdout).strip()
+
     commit_result = run('rev-parse', '--verify', 'HEAD')
-    commit = (commit_result.stdout or '').strip().lower()
+    commit_text = commit_result.stdout or ''
+    if isinstance(commit_text, bytes):
+        commit_text = commit_text.decode('ascii', 'replace')
+    commit = commit_text.strip().lower()
     if commit_result.returncode != 0 or len(commit) != 40 or any(
             character not in '0123456789abcdef' for character in commit):
-        detail = (commit_result.stderr or commit_result.stdout or '').strip()
+        detail = failed_detail(commit_result)
         raise SystemExit(f'git provenance could not be obtained: {detail or "invalid commit"}')
     status_result = run('status', '--porcelain=v1', '--untracked-files=all')
     if status_result.returncode != 0:
-        detail = (status_result.stderr or status_result.stdout or '').strip()
+        detail = failed_detail(status_result)
         raise SystemExit(f'git provenance could not be obtained: {detail or "git status failed"}')
     status = status_result.stdout or ''
+    diff_result = run(
+        'diff', '--binary', '--no-ext-diff', '--no-textconv', 'HEAD', '--',
+        binary=True,
+    )
+    if diff_result.returncode != 0:
+        detail = failed_detail(diff_result)
+        raise SystemExit(
+            f'git provenance could not be obtained: {detail or "git diff failed"}')
+    diff = diff_result.stdout or b''
+    untracked_result = run(
+        'ls-files', '--others', '--exclude-standard', '-z', binary=True)
+    if untracked_result.returncode != 0:
+        detail = failed_detail(untracked_result)
+        raise SystemExit(
+            f'git provenance could not be obtained: '
+            f'{detail or "git untracked-file listing failed"}')
+    content_digest = hashlib.sha256()
+    content_digest.update(b'git-diff\0')
+    content_digest.update(diff)
+    content_digest.update(b'\0untracked\0')
+    for raw_name in (untracked_result.stdout or b'').split(b'\0'):
+        if not raw_name:
+            continue
+        relative = Path(os.fsdecode(raw_name))
+        if relative.is_absolute() or '..' in relative.parts:
+            raise SystemExit('git provenance could not be obtained: invalid untracked path')
+        path = repo_root / relative
+        try:
+            resolved = path.resolve()
+        except OSError as exc:
+            raise SystemExit(
+                f'git provenance could not be obtained: {exc}') from exc
+        if resolved != repo_root and repo_root not in resolved.parents:
+            raise SystemExit(
+                'git provenance could not be obtained: untracked path escapes repository')
+        content_digest.update(raw_name)
+        content_digest.update(b'\0')
+        try:
+            if path.is_symlink():
+                content_digest.update(b'link\0')
+                content_digest.update(os.readlink(path).encode('utf-8', 'surrogateescape'))
+            elif path.is_file():
+                content_digest.update(b'file\0')
+                with path.open('rb') as stream:
+                    for block in iter(lambda: stream.read(1024 * 1024), b''):
+                        content_digest.update(block)
+            else:
+                raise SystemExit(
+                    f'git provenance could not be obtained: '
+                    f'untracked path is not a file: {relative}')
+        except OSError as exc:
+            raise SystemExit(f'git provenance could not be obtained: {exc}') from exc
+        content_digest.update(b'\0')
     return {
         'git_commit': commit,
         'git_dirty': bool(status.strip()),
         'git_status_sha256': hashlib.sha256(status.encode('utf-8')).hexdigest(),
+        'git_content_sha256': content_digest.hexdigest(),
     }
 
 
@@ -687,8 +795,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.internal_measure or args.internal_resume:
         return _run_internal(args)
 
-    provenance = git_provenance(REPO_ROOT)
-    if args.require_clean_git and provenance['git_dirty']:
+    provenance_before = git_provenance(REPO_ROOT)
+    if args.require_clean_git and provenance_before['git_dirty']:
         raise SystemExit('release benchmark requires a clean git worktree')
 
     sizes = args.rows or [10_000]
@@ -701,75 +809,87 @@ def main(argv: list[str] | None = None) -> int:
     work.mkdir(parents=True, exist_ok=True)
     if args.catalogue is None and (args.approval_manifest or args.approval_key):
         raise SystemExit('--approval-manifest and --approval-key need --catalogue')
-    if args.catalogue is None:
-        master = build_fixture_master(work / 'fixture-master')
-    else:
-        if args.approval_manifest is None or args.approval_key is None:
-            raise SystemExit(
-                'a catalogue without its signed approval can assert no code, '
-                'so supply --approval-manifest and --approval-key')
-        master = _master_from_paths(args.catalogue, args.approval_manifest,
-                                    args.approval_key)
-
-    places, dropped = coherent_places(master.db_path)
-    if dropped:
-        print(f'places not issued by this catalogue, excluded: {dropped}',
-              file=sys.stderr)
-    if not places:
-        raise SystemExit('the catalogue issues none of the benchmark places')
-    if not args.skip_street_check:
-        violations = street_evidence_violations(Path(pack), places)
-        if violations:
-            for violation in violations[:10]:
-                print(f'street name carries place evidence: {violation}',
-                      file=sys.stderr)
-            raise SystemExit(
-                f'{len(violations)} synthetic addresses resolve to a country '
-                'other than their own; the street names have to be evidence '
-                'free before this tool may measure anything')
-        print(f'street names carry no place evidence ({len(places)} places '
-              f'x {len(STREET_EN) + len(STREET_TC) + len(STREET_SC)} names)')
-
+    fixture_root = None
     results = []
-    for rows in sizes:
-        result = measure(rows, master, Path(pack), work,
-                         args.batch_size, f'{rows} rows', places)
-        results.append(result)
-        print(json.dumps(result, indent=2), flush=True)
-    if args.resume_rows:
-        result = measure_resume(args.resume_rows, master, Path(pack), work,
-                                args.batch_size, args.pause_batches, places)
-        results.append(result)
-        print(json.dumps(result, indent=2), flush=True)
+    try:
+        if args.catalogue is None:
+            fixture_root = _measurement_root(work, 'fixture-master', 0)
+            master = build_fixture_master(fixture_root)
+        else:
+            if args.approval_manifest is None or args.approval_key is None:
+                raise SystemExit(
+                    'a catalogue without its signed approval can assert no code, '
+                    'so supply --approval-manifest and --approval-key')
+            master = _master_from_paths(args.catalogue, args.approval_manifest,
+                                        args.approval_key)
 
-    payload = {
-        'pack': Path(pack).name,
-        'pack_bytes': Path(pack).stat().st_size,
-        'pack_sha256': file_sha256(Path(pack)),
-        'catalogue': Path(master.db_path).name,
-        'catalogue_bytes': Path(master.db_path).stat().st_size,
-        'catalogue_sha256': file_sha256(Path(master.db_path)),
-        'approval_manifest': Path(master.manifest_path).name,
-        'approval_manifest_sha256': file_sha256(Path(master.manifest_path)),
-        'approval_scope': master.approval.scope,
-        'places': len(places),
-        'places_sha256': hashlib.sha256(
-            json.dumps(places, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
-        ).hexdigest(),
-        'places_excluded': dropped,
-        'rules_version': RULES_VERSION,
-        **provenance,
-        'python': sys.version,
-        'platform': sys.platform,
-        'results': results,
-    }
-    if args.out:
-        args.out.parent.mkdir(parents=True, exist_ok=True)
-        args.out.write_text(json.dumps(payload, indent=2), encoding='utf-8')
-        print(f'wrote {args.out}')
-    if not args.keep_inputs:
-        _cleanup_measurement_inputs(work, results)
-    return 0
+        places, dropped = coherent_places(master.db_path)
+        if dropped:
+            print(f'places not issued by this catalogue, excluded: {dropped}',
+                  file=sys.stderr)
+        if not places:
+            raise SystemExit('the catalogue issues none of the benchmark places')
+        if not args.skip_street_check:
+            violations = street_evidence_violations(Path(pack), places)
+            if violations:
+                for violation in violations[:10]:
+                    print(f'street name carries place evidence: {violation}',
+                          file=sys.stderr)
+                raise SystemExit(
+                    f'{len(violations)} synthetic addresses resolve to a country '
+                    'other than their own; the street names have to be evidence '
+                    'free before this tool may measure anything')
+            print(f'street names carry no place evidence ({len(places)} places '
+                  f'x {len(STREET_EN) + len(STREET_TC) + len(STREET_SC)} names)')
+
+        for rows in sizes:
+            result = measure(rows, master, Path(pack), work,
+                             args.batch_size, f'{rows} rows', places)
+            results.append(result)
+            print(json.dumps(result, indent=2), flush=True)
+        if args.resume_rows:
+            result = measure_resume(args.resume_rows, master, Path(pack), work,
+                                    args.batch_size, args.pause_batches, places)
+            results.append(result)
+            print(json.dumps(result, indent=2), flush=True)
+
+        provenance_after = git_provenance(REPO_ROOT)
+        if provenance_after != provenance_before:
+            raise SystemExit('git provenance changed during benchmark measurement')
+
+        payload = {
+            'pack': Path(pack).name,
+            'pack_bytes': Path(pack).stat().st_size,
+            'pack_sha256': file_sha256(Path(pack)),
+            'catalogue': Path(master.db_path).name,
+            'catalogue_bytes': Path(master.db_path).stat().st_size,
+            'catalogue_sha256': file_sha256(Path(master.db_path)),
+            'approval_manifest': Path(master.manifest_path).name,
+            'approval_manifest_sha256': file_sha256(Path(master.manifest_path)),
+            'approval_scope': master.approval.scope,
+            'places': len(places),
+            'places_sha256': hashlib.sha256(
+                json.dumps(places, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
+            ).hexdigest(),
+            'places_excluded': dropped,
+            'rules_version': RULES_VERSION,
+            **provenance_after,
+            'python': sys.version,
+            'platform': sys.platform,
+            'results': results,
+        }
+        if args.out:
+            args.out.parent.mkdir(parents=True, exist_ok=True)
+            args.out.write_text(json.dumps(payload, indent=2), encoding='utf-8')
+            print(f'wrote {args.out}')
+        return 0
+    finally:
+        if not args.keep_inputs:
+            try:
+                _cleanup_measurement_inputs(work, results)
+            finally:
+                if fixture_root is not None:
+                    _remove_owned_root(fixture_root)
 
 
 if __name__ == '__main__':

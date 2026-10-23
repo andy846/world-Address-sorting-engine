@@ -10,12 +10,19 @@ import os
 from pathlib import Path
 import re
 import tempfile
-from typing import Iterable, Iterator
+from typing import Iterable, Iterator, NamedTuple
 
 from world_address_engine.models import AddressRecord, ClassificationResult
 
 CHUNK_PATTERN = re.compile(r'^(\d{12})-(\d{12})-([0-9a-f]{64})\.jsonl$')
 HEADER_KEY = 'checkpoint_header'
+
+
+class ShardHeader(NamedTuple):
+    start: int
+    end: int
+    previous: str | None
+    rules_version: str
 
 
 def file_sha256(path: Path) -> str:
@@ -97,17 +104,18 @@ def committed_shards(state_dir: Path, *,
             raise ValueError('corrupt checkpoint: missing, overlapping or out-of-order shard')
         if file_sha256(shard) != digest:
             raise ValueError('checkpoint checksum mismatch')
-        shard_previous, shard_rules_version = _header_metadata(shard)
-        if shard_previous != previous_digest:
+        header = _header_metadata(shard)
+        if header.start != start or header.end != end:
+            raise ValueError(
+                'corrupt checkpoint: shard header does not match its filename')
+        if header.previous != previous_digest:
             raise ValueError('checkpoint shard chain broken; the shard set was rewritten')
-        if shard_rules_version is None:
-            raise ValueError('checkpoint shard has no rules version')
-        if shard_rules_version != expected_rules_version:
+        if header.rules_version != expected_rules_version:
             raise ValueError('checkpoint shard rules version does not match this run')
         if (recorded_rules_version is not None
-                and shard_rules_version != recorded_rules_version):
+                and header.rules_version != recorded_rules_version):
             raise ValueError('checkpoint shard rules version changed mid-run')
-        recorded_rules_version = shard_rules_version
+        recorded_rules_version = header.rules_version
         expected = end + 1
         previous_digest = digest
     return shards, expected - 1
@@ -122,37 +130,97 @@ def _last_digest(state_dir: Path) -> str | None:
     return match.group(3) if match else None
 
 
-def _header_metadata(shard: Path) -> tuple[str | None, str | None]:
-    """The chain digest and rules version recorded inside a shard header."""
+def _header_metadata(shard: Path) -> ShardHeader:
+    """Parse and validate the first line of a committed shard."""
     try:
         with shard.open(encoding='utf8') as stream:
             first = stream.readline()
-    except OSError:
-        return None, None
+    except OSError as exc:
+        raise ValueError('corrupt checkpoint: shard header is unreadable') from exc
     try:
         payload = json.loads(first)
-    except ValueError:
-        return None, None
+    except (TypeError, ValueError) as exc:
+        raise ValueError('corrupt checkpoint: shard header is invalid JSON') from exc
+    return _header_from_payload(payload)
+
+
+def _header_from_payload(payload: object) -> ShardHeader:
+    if not isinstance(payload, dict):
+        raise ValueError('corrupt checkpoint: shard header is invalid')
     header = payload.get(HEADER_KEY)
     if not isinstance(header, dict):
-        return None, None
+        raise ValueError('corrupt checkpoint: shard header is missing')
+    start = header.get('start')
+    end = header.get('end')
     previous = header.get('previous')
     rules_version = header.get('rules_version')
-    return (previous if isinstance(previous, str) else None,
-            rules_version if isinstance(rules_version, str) else None)
+    if (not isinstance(start, int) or isinstance(start, bool)
+            or not isinstance(end, int) or isinstance(end, bool)
+            or start < 1 or end < start):
+        raise ValueError('corrupt checkpoint: invalid shard row boundary')
+    if previous is not None and (
+            not isinstance(previous, str)
+            or len(previous) != 64
+            or any(character not in '0123456789abcdef' for character in previous)):
+        raise ValueError('corrupt checkpoint: invalid previous-shard digest')
+    if not isinstance(rules_version, str) or not rules_version.strip():
+        raise ValueError('corrupt checkpoint: shard has no rules version')
+    return ShardHeader(start, end, previous, rules_version)
 
 
 def iter_saved_pairs(shards: Iterable[Path]) -> Iterator[tuple[AddressRecord, ClassificationResult]]:
     previous = 0
     for shard in shards:
-        with shard.open(encoding='utf8') as stream:
-            for line in stream:
-                payload = json.loads(line)
-                if HEADER_KEY in payload:
-                    continue
-                record = AddressRecord(**payload['record'])
-                result = ClassificationResult(**payload['result'])
-                if record.record_no != previous + 1 or result.record_no != record.record_no:
-                    raise ValueError('corrupt checkpoint: record ordering')
-                previous += 1
-                yield record, result
+        match = CHUNK_PATTERN.fullmatch(shard.name)
+        if not match:
+            raise ValueError('invalid committed checkpoint filename')
+        filename_start, filename_end, filename_digest = (
+            int(match[1]), int(match[2]), match[3])
+        digest = hashlib.sha256()
+        header = None
+        rows = 0
+        try:
+            with shard.open('rb') as stream:
+                for raw_line in stream:
+                    digest.update(raw_line)
+                    try:
+                        payload = json.loads(raw_line.decode('utf8'))
+                    except (UnicodeDecodeError, TypeError, ValueError) as exc:
+                        raise ValueError(
+                            f'corrupt checkpoint: invalid JSON in {shard.name}') from exc
+                    if header is None:
+                        header = _header_from_payload(payload)
+                        if (header.start != filename_start
+                                or header.end != filename_end):
+                            raise ValueError(
+                                'corrupt checkpoint: shard header does not match '
+                                'its filename')
+                        if header.start != previous + 1:
+                            raise ValueError(
+                                'corrupt checkpoint: shard row boundary is not contiguous')
+                        continue
+                    if HEADER_KEY in payload:
+                        raise ValueError(
+                            f'corrupt checkpoint: duplicate header in {shard.name}')
+                    try:
+                        record = AddressRecord(**payload['record'])
+                        result = ClassificationResult(**payload['result'])
+                    except (KeyError, TypeError, ValueError) as exc:
+                        raise ValueError(
+                            f'corrupt checkpoint: invalid row in {shard.name}') from exc
+                    if record.record_no != previous + 1 or result.record_no != record.record_no:
+                        raise ValueError('corrupt checkpoint: record ordering')
+                    rows += 1
+                    previous += 1
+                    yield record, result
+        except OSError as exc:
+            raise ValueError(f'corrupt checkpoint: cannot read {shard.name}') from exc
+        if header is None:
+            raise ValueError(f'corrupt checkpoint: empty shard {shard.name}')
+        expected_rows = filename_end - filename_start + 1
+        if rows != expected_rows or previous != filename_end:
+            raise ValueError(
+                f'corrupt checkpoint: shard row count does not match its boundary '
+                f'in {shard.name}')
+        if digest.hexdigest() != filename_digest:
+            raise ValueError('checkpoint checksum mismatch')

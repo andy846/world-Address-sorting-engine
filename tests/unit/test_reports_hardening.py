@@ -8,6 +8,8 @@ production exports), 11 (the summary bypasses the formula sanitizer) and
 import csv
 import json
 
+import pytest
+
 from world_address_engine.io.reports import RESULT_FIELDS, write_reports
 from world_address_engine.models import AddressRecord, ClassificationResult
 
@@ -106,3 +108,22 @@ def test_export_fails_closed_when_the_code_validator_is_missing(tmp_path):
     else:
         raise AssertionError('expected the export to refuse to publish a code')
     assert not (tmp_path / 'Run_Manifest.json').exists()
+
+
+def test_staging_cleanup_failure_never_publishes_a_complete_manifest(
+        tmp_path, monkeypatch):
+    """Plaintext staging data may not be silently retained behind COMPLETE."""
+    from world_address_engine.io import reports
+
+    def leave_staging_in_place(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(reports.shutil, 'rmtree', leave_staging_in_place)
+    with pytest.raises(OSError, match='staging|cleanup'):
+        write_reports(
+            iter([pair(1, code='JP', destination_id='japan')]),
+            tmp_path,
+            PRODUCTION,
+        )
+    assert not (tmp_path / 'Run_Manifest.json').exists()
+    assert not list(tmp_path.glob('.pending-manifest-*'))

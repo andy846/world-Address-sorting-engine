@@ -337,6 +337,128 @@ def test_shard_verification_re_derives_every_committed_result(tmp_path):
     assert not (out / 'Run_Manifest.json').exists()
 
 
+def test_checkpoint_record_must_match_the_original_source(tmp_path):
+    """A checkpoint is not authority for recipient fields or record identity."""
+    data = tmp_path / 'sample.csv'
+    source(data, ['India'])
+    out = tmp_path / 'out'
+    master = hkp(tmp_path)
+    run(data, out, geo(tmp_path), master, {}, batch_size=1, max_batches=1,
+        allow_unverified_reference_data=True)
+    shard = next((out / '.job-state').glob('*.jsonl'))
+
+    def forge(payloads):
+        payloads[0]['record']['fields']['NAME_ADDRESS_LINE1'] = 'Mallory'
+        payloads[0]['record']['record_id'] = '999999'
+
+    _rewrite_shard(shard, forge)
+    with pytest.raises(ValueError, match='source|record|verif|mismatch'):
+        resume_job(out)
+    assert not (out / 'Run_Manifest.json').exists()
+
+
+def test_checkpoint_result_metadata_must_match_a_fresh_classification(tmp_path):
+    """Status/code alone are not the whole result and cannot be trusted alone."""
+    data = tmp_path / 'sample.csv'
+    source(data, ['India'])
+    out = tmp_path / 'out'
+    master = hkp(tmp_path)
+    run(data, out, geo(tmp_path), master, {}, batch_size=1, max_batches=1,
+        allow_unverified_reference_data=True)
+    shard = next((out / '.job-state').glob('*.jsonl'))
+
+    def forge(payloads):
+        result = payloads[0]['result']
+        result['confidence'] = 0.01
+        result['reason'] = 'FORGED_REASON'
+        result['evidence'] = ['forged-evidence']
+        result['destination_name_en'] = 'Forged destination'
+        result['destination_name_tc'] = '偽造目的地'
+
+    _rewrite_shard(shard, forge)
+    with pytest.raises(ValueError, match='verif|re-deriv|mismatch'):
+        resume_job(out)
+    assert not (out / 'Run_Manifest.json').exists()
+
+
+def test_shard_header_bounds_must_match_its_filename(tmp_path):
+    data = tmp_path / 'sample.csv'
+    source(data, ['India', 'Japan'])
+    out = tmp_path / 'out'
+    master = hkp(tmp_path)
+    run(data, out, geo(tmp_path), master, {}, batch_size=2, max_batches=1,
+        allow_unverified_reference_data=True)
+    shard = next((out / '.job-state').glob('*.jsonl'))
+    payloads = [json.loads(line) for line in shard.read_text(encoding='utf-8').splitlines()]
+    payloads[0]['checkpoint_header']['end'] = 1
+    shard.write_text(
+        '\n'.join(json.dumps(p, ensure_ascii=False, separators=(',', ':'))
+                  for p in payloads) + '\n',
+        encoding='utf-8', newline='\n')
+    start, end, _old = shard.name[:-len('.jsonl')].split('-')
+    target = shard.with_name(f'{start}-{end}-{file_sha256(shard)}.jsonl')
+    shard.rename(target)
+
+    with pytest.raises(ValueError, match='header|boundary|corrupt'):
+        resume_job(out)
+    assert not (out / 'Run_Manifest.json').exists()
+
+
+def test_a_removed_tail_row_cannot_hide_source_records(tmp_path):
+    data = tmp_path / 'sample.csv'
+    source(data, ['India', 'Japan'])
+    out = tmp_path / 'out'
+    master = hkp(tmp_path)
+    run(data, out, geo(tmp_path), master, {}, batch_size=2, max_batches=1,
+        allow_unverified_reference_data=True)
+    shard = next((out / '.job-state').glob('*.jsonl'))
+    payloads = [json.loads(line) for line in shard.read_text(encoding='utf-8').splitlines()]
+    # Keep the advertised 1-2 range but remove record 2 from the shard body.
+    shard.write_text(
+        '\n'.join(json.dumps(p, ensure_ascii=False, separators=(',', ':'))
+                  for p in payloads[:-1]) + '\n',
+        encoding='utf-8', newline='\n')
+    start, end, _old = shard.name[:-len('.jsonl')].split('-')
+    target = shard.with_name(f'{start}-{end}-{file_sha256(shard)}.jsonl')
+    shard.rename(target)
+
+    with pytest.raises(ValueError, match='row count|boundary|corrupt'):
+        resume_job(out)
+    assert not (out / 'Run_Manifest.json').exists()
+
+
+def test_a_shard_cannot_be_swapped_between_verification_and_export(
+        tmp_path, monkeypatch):
+    """The rows that were verified must be the rows that are exported."""
+    from world_address_engine.jobs import runner
+
+    data = tmp_path / 'sample.csv'
+    source(data, ['India'])
+    out = tmp_path / 'out'
+    master = hkp(tmp_path)
+    run(data, out, geo(tmp_path), master, {}, batch_size=1, max_batches=1,
+        allow_unverified_reference_data=True)
+    shard = next((out / '.job-state').glob('*.jsonl'))
+    actual_write = runner.write_reports
+
+    def mutate_then_write(items, output_dir, metadata, **kwargs):
+        payloads = [
+            json.loads(line)
+            for line in shard.read_text(encoding='utf-8').splitlines()
+        ]
+        payloads[1]['record']['fields']['NAME_ADDRESS_LINE1'] = 'Mallory'
+        shard.write_text(
+            '\n'.join(json.dumps(p, ensure_ascii=False, separators=(',', ':'))
+                      for p in payloads) + '\n',
+            encoding='utf-8', newline='\n')
+        return actual_write(items, output_dir, metadata, **kwargs)
+
+    monkeypatch.setattr(runner, 'write_reports', mutate_then_write)
+    with pytest.raises(ValueError, match='source|record|checksum|verif|mismatch'):
+        resume_job(out)
+    assert not (out / 'Run_Manifest.json').exists()
+
+
 def test_relabelled_rules_and_forged_shard_are_still_reverified(
         tmp_path, monkeypatch):
     """Relabelling every writable rules field cannot make verification optional."""
