@@ -1,0 +1,386 @@
+"""The benchmark has to measure the path a real mailing run takes.
+
+The catalogue file is data, not authority: without the signed approval
+that governs it, no destination code may be asserted, and every record
+would come out as a review. A measurement that only produces reviews
+describes work a production run never does.
+
+The measurement also has to be *attributable*. The peak resident memory of
+a process is its high water mark, so a run that shares a process with an
+earlier one cannot be told apart from it. Every measurement therefore runs
+in a process of its own.
+"""
+
+import os
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+for extra in (ROOT, ROOT / "tools"):
+    if str(extra) not in sys.path:
+        sys.path.insert(0, str(extra))
+
+from benchmark_batch import (  # noqa: E402
+    PLACES,
+    _cleanup_measurement_inputs,
+    _measurement_root,
+    build_fixture_master,
+    git_provenance,
+    main,
+    measure,
+    measure_resume,
+    peak_rss_bytes,
+    street_evidence_violations,
+)
+from tests.unit.test_retrieve import geo  # noqa: E402
+
+
+def test_the_benchmark_measures_the_matching_path(tmp_path):
+    master = build_fixture_master(tmp_path / "master")
+    gazetteer = geo(tmp_path)
+    places = [place for place in PLACES if place[5] in ("JP", "IN")]
+    result = measure(30, master, gazetteer, tmp_path / "work", 10, "test", places)
+    assert result["status_counts"].get("MATCHED", 0) > 0
+    assert result["status_counts"].get("REVIEW_CODE_MAPPING", 0) == 0
+
+
+def test_the_benchmark_reports_the_pack_and_the_catalogue_it_measured(tmp_path):
+    """A measurement may never be read without the data it was taken against."""
+    master = build_fixture_master(tmp_path / "master")
+    gazetteer = geo(tmp_path)
+    places = [place for place in PLACES if place[5] in ("JP", "IN")]
+    result = measure(30, master, gazetteer, tmp_path / "work", 10, "test", places)
+    assert result["pack_bytes"] == gazetteer.stat().st_size
+    assert result["catalogue_bytes"] == master.db_path.stat().st_size
+    assert result["records_per_second"] > 0
+
+
+def test_every_measurement_runs_in_a_process_of_its_own(tmp_path):
+    """The peak memory of a run belongs to that run and to no other."""
+    master = build_fixture_master(tmp_path / "master")
+    gazetteer = geo(tmp_path)
+    places = [place for place in PLACES if place[5] in ("JP", "IN")]
+    first = measure(30, master, gazetteer, tmp_path / "work", 10, "test", places)
+    second = measure(30, master, gazetteer, tmp_path / "work", 10, "test", places)
+    assert first["pid"] != os.getpid()
+    assert second["pid"] != os.getpid()
+    assert first["pid"] != second["pid"]
+    assert first["peak_rss_bytes"] > 0
+    assert second["peak_rss_bytes"] > 0
+
+
+def test_measurement_uses_its_requested_work_directory(tmp_path):
+    master = build_fixture_master(tmp_path / "master")
+    work = tmp_path / "private-benchmark-work"
+    gazetteer = geo(tmp_path)
+    places = [place for place in PLACES if place[5] in ("JP", "IN")]
+    result = measure(30, master, gazetteer, work, 10, "test", places)
+    root = work / result["measurement_dir"]
+    assert root.parent == work.resolve()
+    assert (root / result["output_dir"] / "Run_Manifest.json").is_file()
+
+
+def test_resume_measurement_uses_its_requested_work_directory(tmp_path):
+    master = build_fixture_master(tmp_path / "master")
+    work = tmp_path / "private-benchmark-work"
+    gazetteer = geo(tmp_path)
+    places = [place for place in PLACES if place[5] in ("JP", "IN")]
+    result = measure_resume(30, master, gazetteer, work, 10, 1, places)
+    root = work / result["measurement_dir"]
+    assert root.parent == work.resolve()
+    assert (root / result["output_dir"] / "Run_Manifest.json").is_file()
+
+
+@pytest.mark.parametrize("kind", ["measure", "resume"])
+def test_measurement_never_deletes_preexisting_work_artifacts(tmp_path, kind):
+    master = build_fixture_master(tmp_path / "master")
+    work = tmp_path / "existing-private-work"
+    work.mkdir()
+    sentinel = work / "run-30"
+    sentinel.mkdir()
+    protected = sentinel / "operator-file.txt"
+    protected.write_text("keep me", encoding="utf-8")
+    places_file = work / "places.json"
+    places_file.write_text("operator data", encoding="utf-8")
+    gazetteer = geo(tmp_path)
+    places = [place for place in PLACES if place[5] in ("JP", "IN")]
+    if kind == "measure":
+        measure(30, master, gazetteer, work, 10, "test", places)
+    else:
+        measure_resume(30, master, gazetteer, work, 10, 1, places)
+    assert protected.read_text(encoding="utf-8") == "keep me"
+    assert places_file.read_text(encoding="utf-8") == "operator data"
+
+
+def test_relative_pack_path_is_resolved_before_the_child_changes_directory(
+        tmp_path, monkeypatch):
+    master = build_fixture_master(tmp_path / "master")
+    gazetteer = geo(tmp_path)
+    work = tmp_path / "private-benchmark-work"
+    places = [place for place in PLACES if place[5] in ("JP", "IN")]
+    monkeypatch.chdir(tmp_path)
+    result = measure(30, master, Path(gazetteer.name), work, 10, "test", places)
+    assert result["pack_sha256"]
+    assert result["rules_version"]
+
+
+def test_a_measurement_that_matched_nothing_is_refused(tmp_path):
+    """A throughput number for a run that asserted nothing is not a measurement."""
+    master = build_fixture_master(tmp_path / "master")
+    gazetteer = geo(tmp_path)
+    # Portugal is not issued by the fixture master, so no row can be matched.
+    places = [place for place in PLACES if place[5] == "PT"]
+    with pytest.raises(SystemExit):
+        measure(30, master, gazetteer, tmp_path / "work", 10, "test", places)
+
+
+def test_a_resume_measurement_that_matched_nothing_is_refused(tmp_path):
+    master = build_fixture_master(tmp_path / "master")
+    gazetteer = geo(tmp_path)
+    places = [place for place in PLACES if place[5] == "PT"]
+    with pytest.raises(SystemExit, match="matched no record"):
+        measure_resume(30, master, gazetteer, tmp_path / "work", 10, 1, places)
+
+
+def test_the_resume_measurement_reports_memory_and_the_data_it_measured(tmp_path):
+    """A restart cost without its memory and its data is not a measurement."""
+    master = build_fixture_master(tmp_path / "master")
+    gazetteer = geo(tmp_path)
+    places = [place for place in PLACES if place[5] in ("JP", "IN")]
+    result = measure_resume(30, master, gazetteer, tmp_path / "work", 10, 1, places)
+    assert result["peak_rss_bytes"] > 0
+    assert result["pack_bytes"] == gazetteer.stat().st_size
+    assert result["catalogue_bytes"] == master.db_path.stat().st_size
+    assert result["pid"] != os.getpid()
+
+
+def test_the_peak_memory_of_a_process_is_never_reported_as_zero(tmp_path):
+    """A number the tool could not measure must not be a number at all."""
+    assert peak_rss_bytes() > 0
+
+
+def test_the_street_names_carry_no_place_evidence(tmp_path, monkeypatch):
+    """A street name is a place name the reader would look up."""
+    gazetteer = geo(tmp_path, extra_rows=[
+        "\t".join(["99", "Nanjing", "Nanjing", "", "0", "0", "P", "PPL", "CN",
+                   "", "01", "", "", "", "8000000", "", "", "UTC", "2024-01-01"])],
+        extra_aliases=[
+            "101\t1\tzh-Hant\t東京\n",
+            "102\t4\tzh-Hant\t孟買\n",
+            "103\t7\tzh\t印度\n",
+            "104\t8\tzh\t日本\n",
+        ])
+    # This tiny gazetteer contains Tokyo and Mumbai, not all Japanese and
+    # Indian cities from the global benchmark pool. Its Han names must be
+    # explicit aliases rather than depend on an optional converter.
+    places = [place for place in PLACES if place[0] in ("Tokyo", "Mumbai")]
+    assert street_evidence_violations(gazetteer, places) == []
+    monkeypatch.setattr("benchmark_batch.STREET_EN", ("Nanjing Road",))
+    violations = street_evidence_violations(gazetteer, places)
+    assert violations
+    assert all(item["problem"] == "the street name adds a country"
+               and item["countries"] == ["CN"] for item in violations)
+
+
+def test_input_cleanup_is_limited_to_owned_measurement_directories(tmp_path):
+    work = tmp_path / "benchmark-work"
+    work.mkdir()
+    caller_input = work / "input-30.csv"
+    caller_input.write_text("caller-owned", encoding="utf-8")
+    owned = _measurement_root(work, "measure", 30)
+    owner = (owned / ".benchmark-owned").read_text(encoding="utf-8")
+    owned_input = owned / "input-30.csv"
+    owned_input.write_text("generated", encoding="utf-8")
+    foreign = work / "measure-30-owned"
+    foreign.mkdir()
+    foreign_input = foreign / "input-30.csv"
+    foreign_input.write_text("foreign", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    outside_input = outside / "input-30.csv"
+    outside_input.write_text("outside", encoding="utf-8")
+
+    _cleanup_measurement_inputs(work, [
+        {"measurement_dir": owned.name, "measurement_owner": owner, "rows": 30},
+        {"measurement_dir": "..", "rows": 30},
+    ])
+
+    assert not owned_input.exists()
+    assert caller_input.read_text(encoding="utf-8") == "caller-owned"
+    assert foreign_input.read_text(encoding="utf-8") == "foreign"
+    assert outside_input.read_text(encoding="utf-8") == "outside"
+
+
+def test_git_provenance_records_commit_dirty_state_and_status_hash():
+    provenance = git_provenance(ROOT)
+    assert len(provenance["git_commit"]) == 40
+    assert isinstance(provenance["git_dirty"], bool)
+    assert len(provenance["git_status_sha256"]) == 64
+    assert len(provenance["git_content_sha256"]) == 64
+
+
+def _git(repo: Path, *arguments: str) -> None:
+    subprocess.run(
+        ["git", *arguments],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
+
+
+def test_git_provenance_hashes_tracked_and_untracked_file_contents(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "benchmark@example.invalid")
+    _git(repo, "config", "user.name", "Benchmark Test")
+    tracked = repo / "tracked.txt"
+    tracked.write_text("committed\n", encoding="utf-8")
+    _git(repo, "add", "tracked.txt")
+    _git(repo, "commit", "-q", "-m", "fixture")
+
+    tracked.write_text("first dirty value\n", encoding="utf-8")
+    first = git_provenance(repo)
+    tracked.write_text("second dirty value\n", encoding="utf-8")
+    second = git_provenance(repo)
+    assert first["git_status_sha256"] == second["git_status_sha256"]
+    assert first["git_content_sha256"] != second["git_content_sha256"]
+
+    untracked = repo / "untracked.txt"
+    untracked.write_text("first untracked value\n", encoding="utf-8")
+    third = git_provenance(repo)
+    untracked.write_text("second untracked value\n", encoding="utf-8")
+    fourth = git_provenance(repo)
+    assert third["git_status_sha256"] == fourth["git_status_sha256"]
+    assert third["git_content_sha256"] != fourth["git_content_sha256"]
+
+
+def _stub_benchmark_run(tmp_path, monkeypatch, provenance_values=None):
+    """Exercise main() without running a multi-process classification."""
+    work = tmp_path / "benchmark-work"
+    work.mkdir()
+    sentinel_dir = work / "fixture-master"
+    sentinel_dir.mkdir()
+    sentinel = sentinel_dir / "operator-file.txt"
+    sentinel.write_text("keep me", encoding="utf-8")
+    gazetteer = geo(tmp_path)
+    real_master = build_fixture_master(tmp_path / "standalone-master")
+    fixture_roots = []
+    provenance = provenance_values or [
+        {
+            "git_commit": "a" * 40,
+            "git_dirty": False,
+            "git_status_sha256": "b" * 64,
+            "git_content_sha256": "c" * 64,
+        }
+    ] * 2
+    calls = iter(provenance)
+
+    def build(directory):
+        fixture_roots.append(Path(directory))
+        Path(directory).mkdir(parents=True, exist_ok=True)
+        return real_master
+
+    def fake_measure(rows, master, pack, root, batch_size, label, places):
+        owned = _measurement_root(Path(root), "measure", rows)
+        owner = (owned / ".benchmark-owned").read_text(encoding="utf-8")
+        return {
+            "label": label,
+            "rows": rows,
+            "status_counts": {"MATCHED": rows},
+            "measurement_dir": owned.name,
+            "measurement_owner": owner,
+        }
+
+    monkeypatch.setattr("benchmark_batch.build_fixture_master", build)
+    monkeypatch.setattr("benchmark_batch.street_evidence_violations", lambda *args: [])
+    monkeypatch.setattr("benchmark_batch.measure", fake_measure)
+    monkeypatch.setattr("benchmark_batch.git_provenance", lambda *args: next(calls))
+    return work, sentinel, gazetteer, fixture_roots
+
+
+def test_main_never_overwrites_the_caller_fixture_master(tmp_path, monkeypatch):
+    work, sentinel, gazetteer, fixture_roots = _stub_benchmark_run(
+        tmp_path, monkeypatch
+    )
+    output = tmp_path / "measurements.json"
+
+    assert main([
+        "--rows", "1",
+        "--pack", str(gazetteer),
+        "--work-dir", str(work),
+        "--out", str(output),
+    ]) == 0
+
+    assert sentinel.read_text(encoding="utf-8") == "keep me"
+    assert len(fixture_roots) == 1
+    assert fixture_roots[0].parent == work.resolve()
+    assert fixture_roots[0] != work.resolve() / "fixture-master"
+    assert json.loads(output.read_text(encoding="utf-8"))["git_content_sha256"] == "c" * 64
+
+
+def test_concurrent_benchmark_runs_get_unique_fixture_roots(tmp_path, monkeypatch):
+    work, sentinel, gazetteer, fixture_roots = _stub_benchmark_run(
+        tmp_path, monkeypatch, provenance_values=[
+            {
+                "git_commit": "a" * 40,
+                "git_dirty": False,
+                "git_status_sha256": "b" * 64,
+                "git_content_sha256": "c" * 64,
+            }
+        ] * 4
+    )
+    for index in range(2):
+        assert main([
+            "--rows", "1",
+            "--pack", str(gazetteer),
+            "--work-dir", str(work),
+            "--out", str(tmp_path / f"measurements-{index}.json"),
+        ]) == 0
+
+    assert sentinel.read_text(encoding="utf-8") == "keep me"
+    assert len(fixture_roots) == 2
+    assert len({path.resolve() for path in fixture_roots}) == 2
+
+
+def test_main_refuses_a_worktree_change_during_measurement(tmp_path, monkeypatch):
+    before = {
+        "git_commit": "a" * 40,
+        "git_dirty": False,
+        "git_status_sha256": "b" * 64,
+        "git_content_sha256": "c" * 64,
+    }
+    after = {
+        "git_commit": "a" * 40,
+        "git_dirty": True,
+        "git_status_sha256": "d" * 64,
+        "git_content_sha256": "e" * 64,
+    }
+    work, _sentinel, gazetteer, _fixture_roots = _stub_benchmark_run(
+        tmp_path, monkeypatch, provenance_values=[before, after]
+    )
+    with pytest.raises(SystemExit, match="changed during"):
+        main([
+            "--rows", "1",
+            "--pack", str(gazetteer),
+            "--work-dir", str(work),
+            "--out", str(tmp_path / "measurements.json"),
+        ])
+    assert not (tmp_path / "measurements.json").exists()
+
+
+def test_git_provenance_fails_closed_when_git_is_unavailable(monkeypatch):
+    class Failed:
+        returncode = 1
+        stdout = ""
+        stderr = "not a git repository"
+
+    monkeypatch.setattr("benchmark_batch.subprocess.run", lambda *args, **kwargs: Failed())
+    with pytest.raises(SystemExit, match="git provenance"):
+        git_provenance(ROOT)

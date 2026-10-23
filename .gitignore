@@ -1,0 +1,38 @@
+# Python build and cache artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.pytest-tmp/
+build/
+dist/
+
+# Local development environments
+.venv/
+.tmp/
+.venv*/
+
+# Generated reference databases and GeoNames build outputs.
+# These are large, reproducible from official sources, and never authoritative
+# unless their manifests are separately reviewed.
+builds/
+data/geonames-source/
+packs/
+*.sqlite
+*.db
+
+# Job output. The .job-state folder stores plaintext recipient address rows
+# as local JSONL checkpoints and must never be committed or uploaded.
+.job-state/
+test-output/
+out/
+
+# Export files hold the same plaintext recipient data as the checkpoints.
+Classified_Addresses*.csv
+Manual_Review.csv
+Country_Summary.csv
+Review_Corrections.csv
+review_decisions.jsonl
+DATA_CLASS.txt
+Run_Manifest.json
+exports/
