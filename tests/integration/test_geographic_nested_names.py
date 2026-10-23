@@ -201,13 +201,19 @@ def test_han_country_and_city_are_matched_in_either_order(text, pack, master):
     assert (result.status, result.hkp_code) == ('MATCHED', 'CN')
 
 
-@pytest.mark.parametrize('text', [
-    'China Mobile', 'Mobile China', 'China Southern', 'China Eastern',
+@pytest.mark.parametrize('text,status,reason', [
+    ('China Mobile', 'UNKNOWN', 'SINGLE_PLACE_IS_NOT_ENOUGH'),
+    ('Mobile China', 'UNKNOWN', 'SINGLE_PLACE_IS_NOT_ENOUGH'),
+    ('China Southern', 'REVIEW_AMBIGUOUS',
+     'MULTIPLE_PLAUSIBLE_GEOGRAPHIC_DESTINATIONS'),
+    ('China Eastern', 'REVIEW_CODE_MAPPING',
+     'GEOGRAPHY_HAS_NO_APPROVED_HKP_MAPPING'),
 ])
-def test_real_pack_never_asserts_a_country_from_brand_text(text, pack, master):
+def test_real_pack_never_asserts_a_country_from_brand_text(
+        text, status, reason, pack, master):
     """A country name that modifies a foreign place is a brand, not a destination."""
     result = classify(rec(text), pack, master)
-    assert result.status != 'MATCHED'
+    assert (result.status, result.reason) == (status, reason)
     assert result.hkp_code is None
 
 
@@ -218,15 +224,17 @@ def test_real_pack_never_erases_a_country_for_a_village_of_the_same_name(
         text, pack, master):
     """A village that shares a country name does not erase the country."""
     result = classify(rec(text), pack, master)
-    assert result.status != 'MATCHED'
-    assert result.hkp_code != 'US'
+    assert (result.status, result.reason) == (
+        'REVIEW_AMBIGUOUS', 'MULTIPLE_STRONG_GEOGRAPHIC_DESTINATIONS')
+    assert result.hkp_code is None
 
 
 def test_real_pack_never_asserts_a_village_country_from_official_name_text(
         pack, master):
     result = classify(rec('Republic of China'), pack, master)
-    assert result.status != 'MATCHED'
-    assert result.hkp_code != 'US'
+    assert (result.status, result.reason) == (
+        'REVIEW_AMBIGUOUS', 'MULTIPLE_STRONG_GEOGRAPHIC_DESTINATIONS')
+    assert result.hkp_code is None
 
 
 @pytest.mark.parametrize('text', ['France Target', 'Target France'])
@@ -234,15 +242,17 @@ def test_real_pack_does_not_assert_a_country_from_a_subdivision_brand(
         text, pack, master):
     """A sub-division of a country is not evidence that the text names it."""
     result = classify(rec(text), pack, master)
-    assert result.status != 'MATCHED'
-    assert result.hkp_code != 'FR'
+    assert (result.status, result.reason) == (
+        'UNKNOWN', 'NO_GEOGRAPHIC_MATCH')
+    assert result.hkp_code is None
 
 
 @pytest.mark.parametrize('text', ['中国東京', '東京中国', '日本上海', '上海日本'])
 def test_real_pack_does_not_assert_a_country_next_to_a_foreign_han_city(
         text, pack, master):
     result = classify(rec(text), pack, master)
-    assert result.status != 'MATCHED'
+    assert (result.status, result.reason) == (
+        'UNKNOWN', 'SINGLE_PLACE_IS_NOT_ENOUGH')
     assert result.hkp_code is None
 
 
