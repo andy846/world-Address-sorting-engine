@@ -214,10 +214,18 @@ def test_bundle_rejects_missing_country_analysis_evidence(runtime_report):
 def test_bundle_proves_icon_progress_and_completed_pending_case_view(runtime_report):
     feedback = runtime_report['gui_feedback']
     assert feedback == {'icon_loaded': True, 'stage_events_observed': True,
+                        'address_line_order_preserved': True,
                         'summary_total': '4', 'summary_pending': '1',
                         'pending_rows': 1, 'first_pending_record': '4'}
     broken = dict(runtime_report)
     broken.pop('gui_feedback')
+    assert 'gui_feedback' in entry.report_errors(broken, expected_version=packaging.project_version())
+
+
+def test_frozen_self_test_proves_click_order_does_not_reorder_address_lines(runtime_report):
+    assert runtime_report['gui_feedback']['address_line_order_preserved'] is True
+    broken = dict(runtime_report)
+    broken['gui_feedback'] = dict(runtime_report['gui_feedback'], address_line_order_preserved=False)
     assert 'gui_feedback' in entry.report_errors(broken, expected_version=packaging.project_version())
 
 

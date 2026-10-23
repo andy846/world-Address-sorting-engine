@@ -712,3 +712,43 @@ def test_new_analysis_and_failure_discard_previous_case_details(window, tmp_path
     assert window.results.pending_value.text() == '-'
     assert not window.results.export_button.isEnabled()
     assert not window._activity_timer.isActive()
+
+
+@pytest.mark.parametrize('selection_order', [(1, 2, 3, 4, 0), (4, 3, 2, 1, 0), (0, 1, 2, 3, 4)])
+def test_address_line_order_is_source_order_not_click_order(window, selection_order):
+    columns = [f'NAME_ADDRESS_LINE{i}' for i in range(1, 6)]
+    window.address_columns.addItems(columns)
+    for index in selection_order:
+        window.address_columns.item(index).setSelected(True)
+    assert window._input_options()['address_columns'] == columns
+    window.address_columns.item(2).setSelected(False)
+    window.address_columns.item(2).setSelected(True)
+    assert window._input_options()['address_columns'] == columns
+
+
+def test_custom_headers_keep_display_order_instead_of_alphabetical_or_click_order(window):
+    columns = ['Recipient', 'Field 10', 'Field 2', 'Destination']
+    window.address_columns.addItems(columns)
+    for index in (3, 1, 2):
+        window.address_columns.item(index).setSelected(True)
+    assert window._input_options()['address_columns'] == columns[1:]
+
+
+def test_analyze_uses_original_line_order_after_reselecting_first_line(window, tmp_path, app, monkeypatch):
+    configure(window, tmp_path)
+    window.address_columns.clear()
+    columns = [f'NAME_ADDRESS_LINE{i}' for i in range(1, 6)]
+    window.address_columns.addItems(columns)
+    for index in (1, 2, 3, 4, 0):
+        window.address_columns.item(index).setSelected(True)
+    received = []
+
+    def analyze(input_path, output, geo_db, options, **kwargs):
+        received.append(options['address_columns'])
+        return report()
+
+    install_runner(monkeypatch, analyze)
+    window.start_job()
+    wait(app, lambda: not window.busy)
+    assert window.job_state == 'done'
+    assert received == [columns]

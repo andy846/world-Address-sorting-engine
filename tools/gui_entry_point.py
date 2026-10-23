@@ -78,6 +78,7 @@ def report_errors(report, *, expected_version: str, require_frozen: bool = False
     if report.get('country_analysis') != expected_country:
         errors.append('country_analysis')
     expected_feedback = {'icon_loaded': True, 'stage_events_observed': True,
+                         'address_line_order_preserved': True,
                          'summary_total': '4', 'summary_pending': '1',
                          'pending_rows': 1, 'first_pending_record': '4'}
     if report.get('gui_feedback') != expected_feedback:
@@ -175,6 +176,12 @@ def self_test() -> dict:
 
             country_window = CountryAnalysisWindow()
             try:
+                line_columns = ['Line 1', 'Line 2', 'Line 3']
+                country_window.address_columns.addItems(line_columns)
+                for index in (1, 2, 0):
+                    country_window.address_columns.item(index).setSelected(True)
+                line_order_preserved = country_window._input_options()['address_columns'] == line_columns
+                country_window.address_columns.clear()
                 country_window.show()
                 app.processEvents()
                 country_input = work / 'country-synthetic.csv'
@@ -195,6 +202,7 @@ def self_test() -> dict:
                 panel = country_window.results
                 report['gui_feedback'] = {
                     'icon_loaded': not country_window.windowIcon().isNull(),
+                    'address_line_order_preserved': line_order_preserved,
                     'stage_events_observed': {'validating', 'hashing_pack', 'classifying',
                                               'exporting', 'finalizing', 'complete'} <= stages,
                     'summary_total': panel.total_value.text(),

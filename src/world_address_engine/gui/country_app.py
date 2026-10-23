@@ -276,13 +276,17 @@ class CountryAnalysisWindow(QMainWindow):
     def _input_options(self) -> dict:
         return {'encoding': self.encoding.currentText(),
                 'sheet_name': self.sheet_name.text().strip() or None,
-                'address_columns': [item.text() for item in self.address_columns.selectedItems()]}
+                # Qt returns selectedItems in selection order, not address-line order.
+                'address_columns': [self.address_columns.item(index).text()
+                                    for index in range(self.address_columns.count())
+                                    if self.address_columns.item(index).isSelected()]}
 
     def _update_column_selection(self) -> None:
         count = len(self.address_columns.selectedItems())
         self.column_selection.setText(
             f'{count} address columns selected. Click each address field to toggle selection; '
-            'select all address lines, not page numbers or IDs.')
+            'select all address lines, not page numbers or IDs. '
+            'Address lines are read in the displayed order, never the click order.')
 
     def _notify(self, title: str, message: str) -> None:
         self.log.append(f'{title}: {message}')
