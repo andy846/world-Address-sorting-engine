@@ -25,5 +25,7 @@ A GitHub-hosted attempt is defined in .github/workflows/build-geonames.yml on fe
 
 - Full manually source-reviewed Hongkong Post destination code catalogue remains unavailable.
 - GeoNames is a geographical source, not approved HKP two-letter destination master.
-- Full worldwide SQLite MB/GB, international and rural-place recognition rates and measured lookup benchmarks remain unverified.
+- Full worldwide SQLite sizes and warm lookup benchmarks are verified above;
+  high-volume throughput, rural recognition rates and production postal
+  precision still require acceptance measurements.
 - Do not commit real recipient addresses, customer CSVs or local .job-state.

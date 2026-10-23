@@ -31,5 +31,7 @@ Classified_Addresses*.csv
 Manual_Review.csv
 Country_Summary.csv
 Review_Corrections.csv
+review_decisions.jsonl
+DATA_CLASS.txt
 Run_Manifest.json
 exports/

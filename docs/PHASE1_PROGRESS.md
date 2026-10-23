@@ -176,9 +176,35 @@ Measured outcomes against `EXTENDED_GLOBAL`:
 - The verified **Hongkong Post** two-character master is still missing
   (Priority 3). Every result above uses `tests/hkp_master_fixture.py`, which
   is explicitly a synthetic fixture and not an official catalogue.
-- The production-approval gate still reads `production_approved` from the
-  catalogue file it is vetting (P0-1, Priority 3).
+- The P0-1 catalogue self-approval bypass was subsequently replaced with
+  a separate signed approval manifest bound to the exact database, source
+  evidence and approved destinations. See `docs/data-sources.md`. The full
+  official source review and production catalogue remain outstanding.
 - Throughput is a single-record cost with no caching (Priority 4).
-- `docs/benchmarks.md` still has no 100k / 1M / 5M measurement, no peak RSS
-  and no labelled gold set, so no accuracy or speed claim may be made.
+- Completed 100k / 1M / 5M measurements remain outstanding. A subsequent
+  2,000-row smoke measurement and a 129-row labelled synthetic golden set
+  are recorded in `docs/benchmarks.md`; neither establishes production
+  accuracy or full-size batch performance.
+
+## 2026-10-23 - durable pack release verification
+
+The Priority 1 download, preservation and offline installation gate now has
+published release evidence in `docs/PACK_RELEASES_2026-10-23.md`. Both the
+original CI k1 databases and current k2 rebuild have separate versioned
+prereleases with manifests, hashes and attribution. Each generation passed
+39 real-pack tests including full SQLite integrity; all 16 uploaded asset
+digests matched. A fresh GitHub download of both k2 profiles was installed
+and queried with socket connections denied.
+
+Commits `e8a0549` and `adafeed` were pushed to the development branch. They
+bind report/manifest format provenance and make benchmark RSS attributable
+to a fresh process. Follow-up `36f991b` fixes an incomplete Han test fixture
+(16 passed/1 failed before, 17 passed after). A combined Windows regression
+run before the next classifier changes passed 386 tests, with 4 skipped.
+
+Independent pack review approved publication; its two nonblocking metadata
+notes were corrected. Independent Windows review found a real QtCore import
+failure in the 65,976,817-byte onefile executable plus exclusion/report and
+timeout-cleanup gaps. Packaging fixes and nested-name classification fixes
+are in progress. No alpha.1 executable or production readiness is claimed.
 
