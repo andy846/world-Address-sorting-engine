@@ -56,7 +56,8 @@ def _data_class(run_metadata: dict) -> str:
 
 def write_reports(items: Iterator[tuple[AddressRecord, ClassificationResult]],
                   output_dir: Path, run_metadata: dict, *, machine_export: bool = False,
-                  code_validator=None, require_validated_codes: bool = False) -> dict[str,int]:
+                  code_validator=None, require_validated_codes: bool = False,
+                  before_manifest=None) -> dict[str,int]:
     output_dir=Path(output_dir)
     output_dir.mkdir(parents=True,exist_ok=True)
     stage=Path(tempfile.mkdtemp(prefix='.run-',dir=output_dir))
@@ -157,6 +158,10 @@ def write_reports(items: Iterator[tuple[AddressRecord, ClassificationResult]],
         if (output_dir/'Run_Manifest.json').exists():
             raise FileExistsError('existing completed run cannot be overwritten')
         for p in files: os.replace(p, output_dir/p.name)
+        # The runner uses this hook to remove plaintext checkpoints after
+        # reports are staged but before the COMPLETE marker is published.
+        if before_manifest is not None:
+            before_manifest()
         os.replace(stage/'Run_Manifest.json',output_dir/'Run_Manifest.json')
         return dict(status_counts)
     finally:

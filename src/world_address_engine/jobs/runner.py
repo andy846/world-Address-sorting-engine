@@ -33,7 +33,7 @@ def _load_approval(manifest_path: Path | None, key_path: Path | None,
 # Bumped whenever the classification or reporting rules change. It is
 # recorded in every export so a result can be traced to the rules that
 # produced it.
-RULES_VERSION = '2026-10-23.3'
+RULES_VERSION = '2026-10-23.4'
 
 # How often the cancel flag is read while a batch is still filling. A cancel
 # must never be ignored because the job is smaller than one batch.
@@ -99,6 +99,14 @@ def _verify_shards(paths, cfg: dict, approval) -> None:
                 'the committed result does not match a fresh classification')
 
 
+def _remove_checkpoint(state: Path) -> None:
+    """Remove plaintext checkpoints or fail without publishing COMPLETE."""
+    if state.exists():
+        shutil.rmtree(state)
+    if state.exists():
+        raise OSError(f'checkpoint cleanup failed; plaintext state remains at {state}')
+
+
 def _records(input_path: Path, options: dict):
     kind = input_path.suffix.lower()
     encoding = options.get('encoding', 'utf-8-sig')
@@ -148,7 +156,8 @@ def _snapshot(input_path: Path, geo_db: Path, hkp_db: Path, options: dict, batch
         'approval_manifest_path': str(Path(approval_manifest).resolve()) if approval_manifest else None,
         'approval_key_path': str(Path(approval_key).resolve()) if approval_key else None,
         'keep_checkpoint': bool(keep_checkpoint),
-        'schema_version': 1,
+        'rules_version': RULES_VERSION,
+        'schema_version': 2,
     }
 
 
@@ -156,7 +165,8 @@ def _process(output_dir: Path, cfg: dict, *, max_batches: int | None = None,
              approval: CatalogueApproval | None = None,
              cancel=None, progress=None) -> dict:
     state = output_dir / '.job-state'
-    paths, last_committed = committed_shards(state)
+    paths, last_committed = committed_shards(
+        state, expected_rules_version=RULES_VERSION)
     source = Path(cfg['input_path'])
     geo = Path(cfg['geo_db'])
     hkp = Path(cfg['hkp_db'])
@@ -185,7 +195,7 @@ def _process(output_dir: Path, cfg: dict, *, max_batches: int | None = None,
         if since_check >= CANCEL_CHECK_INTERVAL and cancelled():
             return {'run_status': 'CANCELLED', 'committed_records': last_committed}
         if len(batch) >= cfg['batch_size']:
-            commit_batch(state, batch)
+            commit_batch(state, batch, RULES_VERSION)
             last_committed = batch[-1][0].record_no
             batch.clear()
             committed_new += 1
@@ -200,8 +210,9 @@ def _process(output_dir: Path, cfg: dict, *, max_batches: int | None = None,
     if cancelled():
         return {'run_status': 'CANCELLED', 'committed_records': last_committed}
     if batch:
-        commit_batch(state, batch)
-    paths, last_committed = committed_shards(state)
+        commit_batch(state, batch, RULES_VERSION)
+    paths, last_committed = committed_shards(
+        state, expected_rules_version=RULES_VERSION)
     # Ensure the source files have not been edited DURING this run. The
     # startup snapshot alone cannot protect against mid-job changes.
     for label, key_path, key_hash in (
@@ -213,8 +224,9 @@ def _process(output_dir: Path, cfg: dict, *, max_batches: int | None = None,
             raise ValueError(f'{label} changed during classification; job incomplete')
     if output_dir.joinpath('Run_Manifest.json').exists():
         raise FileExistsError('completed job already exists')
-    if cfg.get('verify_shards'):
-        _verify_shards(paths, cfg, approval)
+    # A checkpoint is local writable data. Re-derive every committed result
+    # before publication; there is no safe option to skip this final check.
+    _verify_shards(paths, cfg, approval)
     manifest_meta = {
         'production_approved': bool(
             not cfg['allow_unverified_reference_data']
@@ -238,15 +250,16 @@ def _process(output_dir: Path, cfg: dict, *, max_batches: int | None = None,
         'geo_pack_versions': _geo_pack_versions(Path(cfg['geo_db'])),
         'rules_version': RULES_VERSION,
     }
-    counts = write_reports(iter_saved_pairs(paths), output_dir, manifest_meta,
-                           code_validator=_code_validator(Path(cfg['hkp_db']),
-                                                         approval),
-                           require_validated_codes=True)
+    before_manifest = None
     if not cfg.get('keep_checkpoint'):
-        # The checkpoint shards hold the raw customer addresses in plain
-        # text. Once the exports are published the shards are redundant, so
-        # they are removed unless the operator explicitly asks to keep them.
-        shutil.rmtree(state, ignore_errors=True)
+        # Delete plaintext shards after report files are staged but before
+        # publishing COMPLETE. A cleanup failure therefore leaves an
+        # incomplete run, never a completed run with retained plaintext.
+        before_manifest = lambda: _remove_checkpoint(state)
+    counts = write_reports(
+        iter_saved_pairs(paths), output_dir, manifest_meta,
+        code_validator=_code_validator(Path(cfg['hkp_db']), approval),
+        require_validated_codes=True, before_manifest=before_manifest)
     return counts
 
 
@@ -256,10 +269,12 @@ def run_job(input_path: Path, output_dir: Path, geo_db: Path, hkp_db: Path,
             allow_unverified_reference_data: bool = False,
             approval_manifest: Path | None = None,
             approval_key: Path | None = None,
-            verify_shards: bool = False,
+            verify_shards: bool = True,
             keep_checkpoint: bool = False,
             cancel=None, progress=None) -> dict:
     """Start a new offline job. Explicit testing bypass leaves TEST_ONLY manifest."""
+    if verify_shards is not True:
+        raise ValueError('checkpoint shard verification is mandatory')
     input_path, output_dir, geo_db, hkp_db = map(Path, (input_path, output_dir, geo_db, hkp_db))
     if max_batches is not None and max_batches < 1:
         raise ValueError('max_batches must be positive')
@@ -273,7 +288,7 @@ def run_job(input_path: Path, output_dir: Path, geo_db: Path, hkp_db: Path,
     cfg = _snapshot(input_path, geo_db, hkp_db, options, batch_size,
                     allow_unverified_reference_data, approval,
                     approval_manifest, approval_key, keep_checkpoint)
-    cfg['verify_shards'] = bool(verify_shards)
+    cfg['verify_shards'] = True
     state = output_dir / '.job-state'
     if state.exists() or output_dir.joinpath('Run_Manifest.json').exists():
         raise FileExistsError('existing job; use resume_job or a new output directory')
@@ -289,15 +304,19 @@ def resume_job(run_dir: Path, *, max_batches: int | None = None,
                keep_checkpoint: bool | None = None,
                cancel=None, progress=None) -> dict:
     """Resume a paused/failed job ONLY if all source versions still match."""
+    if verify_shards is False:
+        raise ValueError('checkpoint shard verification is mandatory')
     if max_batches is not None and max_batches < 1:
         raise ValueError('max_batches must be positive')
     output = Path(run_dir)
     state = output / '.job-state'
     cfg = json.loads((state / 'config.json').read_text(encoding='utf8'))
-    if cfg['schema_version'] != 1:
+    if cfg['schema_version'] != 2:
         raise ValueError('unsupported checkpoint schema')
     if (output / 'Run_Manifest.json').exists():
         raise FileExistsError('completed job already exists')
+    if cfg.get('rules_version') != RULES_VERSION:
+        raise ValueError('classification rules version changed or was not recorded; start a new job')
     if file_sha256(Path(cfg['input_path'])) != cfg['input_sha256']:
         raise ValueError('input source changed since checkpoint')
     if file_sha256(Path(cfg['geo_db'])) != cfg['geo_sha256']:
@@ -318,7 +337,7 @@ def resume_job(run_dir: Path, *, max_batches: int | None = None,
         if not approval.is_production:
             raise ValueError('the supplied HKP approval cannot authorise production')
     if verify_shards is not None:
-        cfg['verify_shards'] = bool(verify_shards)
+        cfg['verify_shards'] = True
     if keep_checkpoint is not None:
         cfg['keep_checkpoint'] = bool(keep_checkpoint)
     return _process(output, cfg, max_batches=max_batches, approval=approval,

@@ -39,9 +39,12 @@ def atomic_json(path: Path, value: dict) -> None:
         Path(tmp_name).unlink(missing_ok=True)
 
 
-def commit_batch(state_dir: Path, batch: list[tuple[AddressRecord, ClassificationResult]]) -> Path:
+def commit_batch(state_dir: Path, batch: list[tuple[AddressRecord, ClassificationResult]],
+                 rules_version: str) -> Path:
     if not batch:
         raise ValueError('empty batch')
+    if not isinstance(rules_version, str) or not rules_version.strip():
+        raise ValueError('a non-empty rules version is required')
     start = batch[0][0].record_no
     end = batch[-1][0].record_no
     if end - start + 1 != len(batch):
@@ -53,6 +56,7 @@ def commit_batch(state_dir: Path, batch: list[tuple[AddressRecord, Classificatio
             previous = _last_digest(state_dir)
             stream.write(json.dumps({HEADER_KEY: {
                 'start': start, 'end': end, 'previous': previous,
+                'rules_version': rules_version,
             }}, ensure_ascii=False, separators=(',', ':')) + '\n')
             for row, result in batch:
                 if row.record_no != result.record_no:
@@ -76,10 +80,14 @@ def commit_batch(state_dir: Path, batch: list[tuple[AddressRecord, Classificatio
         tmp.unlink(missing_ok=True)
 
 
-def committed_shards(state_dir: Path) -> tuple[list[Path], int]:
+def committed_shards(state_dir: Path, *,
+                     expected_rules_version: str) -> tuple[list[Path], int]:
+    if not isinstance(expected_rules_version, str) or not expected_rules_version.strip():
+        raise ValueError('a non-empty expected rules version is required')
     shards = sorted(state_dir.glob('*.jsonl'))
     expected = 1
     previous_digest = None
+    recorded_rules_version = None
     for shard in shards:
         match = CHUNK_PATTERN.fullmatch(shard.name)
         if not match:
@@ -89,8 +97,17 @@ def committed_shards(state_dir: Path) -> tuple[list[Path], int]:
             raise ValueError('corrupt checkpoint: missing, overlapping or out-of-order shard')
         if file_sha256(shard) != digest:
             raise ValueError('checkpoint checksum mismatch')
-        if _header_previous(shard) != previous_digest:
+        shard_previous, shard_rules_version = _header_metadata(shard)
+        if shard_previous != previous_digest:
             raise ValueError('checkpoint shard chain broken; the shard set was rewritten')
+        if shard_rules_version is None:
+            raise ValueError('checkpoint shard has no rules version')
+        if shard_rules_version != expected_rules_version:
+            raise ValueError('checkpoint shard rules version does not match this run')
+        if (recorded_rules_version is not None
+                and shard_rules_version != recorded_rules_version):
+            raise ValueError('checkpoint shard rules version changed mid-run')
+        recorded_rules_version = shard_rules_version
         expected = end + 1
         previous_digest = digest
     return shards, expected - 1
@@ -105,22 +122,24 @@ def _last_digest(state_dir: Path) -> str | None:
     return match.group(3) if match else None
 
 
-def _header_previous(shard: Path) -> str | None:
-    """The previous-shard digest recorded inside the shard's own header."""
+def _header_metadata(shard: Path) -> tuple[str | None, str | None]:
+    """The chain digest and rules version recorded inside a shard header."""
     try:
         with shard.open(encoding='utf8') as stream:
             first = stream.readline()
     except OSError:
-        return None
+        return None, None
     try:
         payload = json.loads(first)
     except ValueError:
-        return None
+        return None, None
     header = payload.get(HEADER_KEY)
     if not isinstance(header, dict):
-        return None
+        return None, None
     previous = header.get('previous')
-    return previous if isinstance(previous, str) else None
+    rules_version = header.get('rules_version')
+    return (previous if isinstance(previous, str) else None,
+            rules_version if isinstance(rules_version, str) else None)
 
 
 def iter_saved_pairs(shards: Iterable[Path]) -> Iterator[tuple[AddressRecord, ClassificationResult]]:

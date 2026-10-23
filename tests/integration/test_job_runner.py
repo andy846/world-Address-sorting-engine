@@ -71,6 +71,58 @@ def test_pause_resume_avoids_duplicate_records(tmp_path):
     ]
 
 
+@pytest.mark.parametrize('missing_version', [False, True])
+def test_resume_refuses_changed_or_unrecorded_rules(tmp_path, monkeypatch, missing_version):
+    from world_address_engine.jobs import runner
+
+    data = tmp_path / 'sample.csv'
+    source(data, ['India', 'Japan'])
+    out = tmp_path / 'out'
+    run(data, out, geo(tmp_path), hkp(tmp_path), batch_size=1, max_batches=1)
+    config_path = out / '.job-state' / 'config.json'
+    if missing_version:
+        config = json.loads(config_path.read_text(encoding='utf-8'))
+        config.pop('rules_version', None)
+        config_path.write_text(json.dumps(config), encoding='utf-8')
+    else:
+        monkeypatch.setattr(runner, 'RULES_VERSION', 'future-rules')
+    with pytest.raises(ValueError, match='rules version'):
+        runner.resume_job(out)
+    assert not (out / 'Run_Manifest.json').exists()
+
+
+def test_resume_rules_version_must_match_the_committed_shard(
+        tmp_path, monkeypatch):
+    """Editing config and the runtime constant cannot relabel old results."""
+    from world_address_engine.jobs import runner
+
+    data = tmp_path / 'sample.csv'
+    source(data, ['India', 'Japan'])
+    out = tmp_path / 'out'
+    run(data, out, geo(tmp_path), hkp(tmp_path), batch_size=1, max_batches=1)
+    config_path = out / '.job-state' / 'config.json'
+    config = json.loads(config_path.read_text(encoding='utf-8'))
+    config['rules_version'] = 'future-rules'
+    config_path.write_text(json.dumps(config), encoding='utf-8')
+    monkeypatch.setattr(runner, 'RULES_VERSION', 'future-rules')
+    with pytest.raises(ValueError, match='shard.*rules version'):
+        runner.resume_job(out)
+    assert not (out / 'Run_Manifest.json').exists()
+
+
+def test_legacy_checkpoint_schema_is_rejected_explicitly(tmp_path):
+    data = tmp_path / 'sample.csv'
+    source(data, ['India', 'Japan'])
+    out = tmp_path / 'out'
+    run(data, out, geo(tmp_path), hkp(tmp_path), batch_size=1, max_batches=1)
+    config_path = out / '.job-state' / 'config.json'
+    config = json.loads(config_path.read_text(encoding='utf-8'))
+    config['schema_version'] = 1
+    config_path.write_text(json.dumps(config), encoding='utf-8')
+    with pytest.raises(ValueError, match='unsupported checkpoint schema'):
+        resume_job(out)
+
+
 def test_mismatched_input_rejects_resume(tmp_path):
     data = tmp_path / 'sample.csv'
     source(data, ['India', 'Japan', 'Macau'])
@@ -206,10 +258,11 @@ def _rewrite_shard(shard: Path, mutate) -> Path:
     """Rewrite a shard payload and rename it with a matching digest."""
     lines = shard.read_text(encoding='utf-8').splitlines()
     payloads = [json.loads(line) for line in lines]
+    header = next(p for p in payloads if 'checkpoint_header' in p)
     payloads = [p for p in payloads if 'checkpoint_header' not in p]
     mutate(payloads)
     body = '\n'.join(json.dumps(p, ensure_ascii=False, separators=(',', ':'))
-                     for p in payloads) + '\n'
+                     for p in [header, *payloads]) + '\n'
     shard.write_text(body, encoding='utf-8', newline='\n')
     start, end, _old = shard.name[:-len('.jsonl')].split('-')
     digest = file_sha256(shard)
@@ -235,7 +288,7 @@ def test_tampered_shard_with_an_unapproved_code_is_refused(tmp_path):
         payloads[0]['result']['confidence'] = 0.99
 
     _rewrite_shard(shard, forge)
-    with pytest.raises(ValueError, match='code|catalogue|validator|chain'):
+    with pytest.raises(ValueError, match='code|catalogue|validator|chain|verif|mismatch'):
         resume_job(out)
     assert not (out / 'Run_Manifest.json').exists()
 
@@ -282,3 +335,65 @@ def test_shard_verification_re_derives_every_committed_result(tmp_path):
     with pytest.raises(ValueError, match='verif|re-deriv|mismatch|chain'):
         resume_job(out, verify_shards=True)
     assert not (out / 'Run_Manifest.json').exists()
+
+
+def test_relabelled_rules_and_forged_shard_are_still_reverified(
+        tmp_path, monkeypatch):
+    """Relabelling every writable rules field cannot make verification optional."""
+    from world_address_engine.jobs import runner
+
+    data = tmp_path / 'sample.csv'
+    source(data, ['India', 'Japan'])
+    out = tmp_path / 'out'
+    master = hkp(tmp_path)
+    run(data, out, geo(tmp_path), master, {}, batch_size=1, max_batches=1,
+        allow_unverified_reference_data=True)
+    shard = next((out / '.job-state').glob('*.jsonl'))
+
+    def forge(payloads):
+        header = payloads[0]['checkpoint_header']
+        header['rules_version'] = 'future-rules'
+        payloads[1]['result']['status'] = 'MATCHED'
+        payloads[1]['result']['hkp_code'] = 'JP'
+        payloads[1]['result']['destination_id'] = 'japan'
+        payloads[1]['result']['confidence'] = 0.99
+
+    lines = shard.read_text(encoding='utf-8').splitlines()
+    payloads = [json.loads(line) for line in lines]
+    forge(payloads)
+    shard.write_text(
+        '\n'.join(json.dumps(p, ensure_ascii=False, separators=(',', ':'))
+                  for p in payloads) + '\n',
+        encoding='utf-8', newline='\n')
+    start, end, _old = shard.name[:-len('.jsonl')].split('-')
+    target = shard.with_name(f'{start}-{end}-{file_sha256(shard)}.jsonl')
+    shard.rename(target)
+
+    config_path = out / '.job-state' / 'config.json'
+    config = json.loads(config_path.read_text(encoding='utf-8'))
+    config['rules_version'] = 'future-rules'
+    config_path.write_text(json.dumps(config), encoding='utf-8')
+    monkeypatch.setattr(runner, 'RULES_VERSION', 'future-rules')
+
+    with pytest.raises(ValueError, match='verif|re-deriv|mismatch'):
+        resume_job(out)
+    assert not (out / 'Run_Manifest.json').exists()
+
+
+def test_checkpoint_cleanup_failure_never_publishes_a_manifest(
+        tmp_path, monkeypatch):
+    """A COMPLETE marker may never coexist with retained plaintext shards."""
+    from world_address_engine.jobs import runner
+
+    data = tmp_path / 'sample.csv'
+    source(data, ['India', 'Japan'])
+    out = tmp_path / 'out'
+
+    def refuse_cleanup(*args, **kwargs):
+        raise OSError('checkpoint cleanup refused')
+
+    monkeypatch.setattr(runner.shutil, 'rmtree', refuse_cleanup)
+    with pytest.raises(OSError, match='cleanup refused'):
+        run(data, out, geo(tmp_path), hkp(tmp_path), {}, batch_size=1)
+    assert not (out / 'Run_Manifest.json').exists()
+    assert (out / '.job-state').is_dir()
