@@ -1,13 +1,46 @@
 # World Address Sorting Engine
 
-A Python, **offline-first**, high-volume address classifier under development. Target output: **Hongkong Post two-letter postal destination codes**, with English, Traditional Chinese and Simplified Chinese input.
+A Python, **offline-first** address-list analyzer. Its default workflow outputs
+one **Country Code** per address plus counts by code, using English, Traditional
+Chinese and Simplified Chinese input. Air/surface service, rates, Zone and
+Novsn codes are not part of this analysis.
+
+## Country Code analysis (alpha.2)
+
+```powershell
+python -m pip install -e ".[excel,gui]"
+world-address-engine-gui
+```
+
+Choose the input file and an installed GeoNames pack, then analyze. The bundled
+country list contains 235 geographic entries derived from the supplied
+236-row CountryList_20250708 reference: mainland China uses `CN`, and the
+service-only `CNS` entry is excluded. These reference codes have their own
+namespace (for example Kosovo `XO`), so they are not blindly copied from ISO.
+The PDF parser is not required at runtime.
+
+```powershell
+world-address-engine analyze --input "sample.csv" --output "sample-country-analysis" --geo-db "packs/geonames-extended-global-2026-10-22-k2/pack.db"
+world-address-engine resume --job-dir "sample-country-analysis"
+```
+
+Outputs are `Classified_Addresses.csv` (original columns plus `Country_Code`),
+`Country_Summary.csv`, `Country_Diagnostics.csv`, and the final
+`Run_Manifest.json`. Clear country evidence is DETERMINED; supported estimates
+are INFERRED; unresolved addresses keep a blank code. Both determined and
+inferred codes contribute to counts. Coverage is not an accuracy guarantee.
+The files remain local; the default completed run removes plaintext checkpoint
+shards. Interrupted runs may retain sensitive `.country-state` data for resume.
+
+The previous signed-HKP `classify` interface remains available for strict
+compatibility. Its production-approval gate is separate from country analysis.
 
 ## Current development status (October 2026)
 
 - Implemented developer-preview modules: typed contracts, signed HKP catalogue approval checks, real Compact/Extended GeoNames packs, trilingual retrieval, conservative classification, streaming CSV/TXT/XLSX input, reconciled exports, checkpoint/resume, and a PySide6 Windows GUI with audited manual review.
 - Both worldwide packs are preserved in [versioned data releases](docs/PACK_RELEASES_2026-10-23.md), verified and installable offline. Current k2 SQLite sizes are 142,577,664 bytes (Compact) and 1,087,344,640 bytes (Extended).
 - Windows onefile build and packaged self-test passed locally. The measured 100,000-row synthetic pipeline processed 109.7 records/sec with 56.8 MiB peak RSS; [measurement scope and provenance](docs/benchmarks.md) matter.
-- **Not production ready:** The official Hongkong Post destination master remains unverified; 1M/5M benchmarks and clean offline Windows operator acceptance are outstanding. Classification is restricted to acknowledged test use. A Simplified Chinese Hong Kong SAR alias gap remains in k2.
+- **Not production ready:** The official Hongkong Post destination master remains unverified; 1M/5M benchmarks and clean offline Windows operator acceptance are outstanding. The strict postal classifier is restricted to acknowledged test use; Country Code analysis is a separate estimation workflow. A Simplified Chinese Hong Kong SAR alias gap remains in k2's strict retrieval, not the new country alias rules.
 - Test examples use synthetic fixtures. No actual recipient address file is committed to this repository.
 
 ## Preview a production address file (no database needed)
@@ -45,7 +78,7 @@ Linux unit/integration checks are not substitutes for independent code review, c
 See `docs/PHASE1_PROGRESS.md` and `docs/superpowers/plans/2026-10-23-hkp-trilingual-mvp-implementation.md` for plan and release gates.
 
 
-## Resumable classification (test-only until approved HKP master exists)
+## Strict Postal Classification Compatibility
 
 Normal classification refuses the current unreviewed HKP reference master. For synthetic tests only, run:
 
