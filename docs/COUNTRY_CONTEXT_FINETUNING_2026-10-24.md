@@ -9,7 +9,8 @@ context, and recheck all rows instead of only reducing the unresolved count.
 - `15f155b`: occurrence roles, contextual HK references, mainland administration,
   complete bounded per-place contributions and support recalculation.
 - `42e03ac`: compound locality context and list-wide reconciliation regressions.
-- Country rules identity is now `2026-10-24.country.2`. Older checkpoints cannot
+- `0407fef`: complete street-name gazetteer aliases are not destinations.
+- Country rules identity is now `2026-10-24.country.3`. Older checkpoints cannot
   resume silently with the new rules. Strict postal approval remains unchanged.
 
 ## Fixes and independent review
@@ -33,15 +34,22 @@ context, and recheck all rows instead of only reducing the unresolved count.
   Jordan locality evidence is retained; conflicting explicit countries stay open.
 - Reconciliation additionally covered compound landmarks and mainland embedded
   localities. No private customer rows were copied into repository tests.
+- Testing the installed CI wheel against the real worldwide pack then exposed
+  `London Road` as a complete ADM2 alias in another country. Checking only what
+  follows a city token was insufficient. Complete terms ending in street/road
+  designators are now withdrawn too; a synthetic ADM2 fixture and the actual
+  worldwide-pack reproduction both passed. Names merely containing `road` are
+  not indiscriminately discarded. Intermediate rule generations and outputs
+  remain distinct; the final rerun uses country rule generation 3.
 
 ## Tests and Windows build
 
-- 62 new synthetic context/regression cases. Country/context/retrieval target:
-  149 passed. Important review findings were reproduced failing before fixing.
+- 64 new synthetic context/regression cases. Country/context/retrieval target:
+  151 passed. Important review findings were reproduced failing before fixing.
 - Final full local suite with both real k2 packs and slow integrity checks:
-  **932 passed, 1 skipped, 2 known strict-retrieval xfails in 183.27 seconds**.
+  **934 passed, 1 skipped, 2 known strict-retrieval xfails in 158.48 seconds**.
 - Syntax and whitespace checks passed.
-- Final Windows onefile build: **48,563,291 bytes**. Frozen self-test passed from
+- Final Windows onefile build: **48,564,828 bytes**. Frozen self-test passed from
   an empty working directory with the packaged 235-entry catalogue, both OpenCC
   converters, country-analysis GUI and synthetic outputs. Legacy production
   approval refusal also passed. No reference DB is bundled in the EXE.
@@ -69,8 +77,8 @@ or checkpoint shards are uploaded to GitHub or CI.
 - Remaining reasons: 82 no geographic match, 26 competing plausible countries,
   9 conflicting country signals. No administrative-region conflict remains in
   this input. These are classifier outcomes, not proof the addresses are invalid.
-- Complete job/export/revalidation/cleanup: **48.847 seconds**, peak job RSS
-  **54,800,384 bytes**. The subsequent full comparison audit peaked at 71,794,688
+- Complete job/export/revalidation/cleanup: **40.202 seconds**, peak job RSS
+  **54,980,608 bytes**. The subsequent full comparison audit peaked at 71,970,816
   bytes. The four standard reports total **1,580,439 bytes**. This measured run
   is not a speed improvement claim or a hardware-independent performance promise.
 - Plaintext checkpoint and finalization folders were removed after completion.
