@@ -211,6 +211,16 @@ def test_bundle_rejects_missing_country_analysis_evidence(runtime_report):
     assert 'country_analysis' in entry.report_errors(report, expected_version=packaging.project_version())
 
 
+def test_bundle_proves_icon_progress_and_completed_pending_case_view(runtime_report):
+    feedback = runtime_report['gui_feedback']
+    assert feedback == {'icon_loaded': True, 'stage_events_observed': True,
+                        'summary_total': '4', 'summary_pending': '1',
+                        'pending_rows': 1, 'first_pending_record': '4'}
+    broken = dict(runtime_report)
+    broken.pop('gui_feedback')
+    assert 'gui_feedback' in entry.report_errors(broken, expected_version=packaging.project_version())
+
+
 def test_bundle_requires_offline_chinese_normalization_data(monkeypatch):
     pytest.importorskip('PySide6')
     from world_address_engine.matching import normalize

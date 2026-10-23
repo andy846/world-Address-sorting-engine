@@ -72,14 +72,16 @@ class WorkerThread(QThread):
     """
 
     progressed = Signal(int)
+    detailedProgress = Signal(object)
     succeeded = Signal(object)
     failed = Signal(str)
 
     def __init__(self, func: Callable[[Callable[[int], None]], object],
-                 cancel: threading.Event | None = None):
+                 cancel: threading.Event | None = None, *, detailed: bool = False):
         super().__init__()
         self._func = func
         self._cancel = cancel
+        self._detailed = detailed
         self.thread_ident: int | None = None
 
     def request_cancel(self) -> None:
@@ -90,7 +92,11 @@ class WorkerThread(QThread):
     def run(self) -> None:
         self.thread_ident = threading.get_ident()
         try:
-            self.succeeded.emit(self._func(self.progressed.emit))
+            if self._detailed:
+                result = self._func(self.progressed.emit, self.detailedProgress.emit)
+            else:
+                result = self._func(self.progressed.emit)
+            self.succeeded.emit(result)
         except Exception as exc:  # surfaced in the window, never swallowed
             self.failed.emit(f'{type(exc).__name__}: {exc}')
 

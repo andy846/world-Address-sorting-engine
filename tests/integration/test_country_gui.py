@@ -134,7 +134,7 @@ def test_analyze_passes_normal_inputs_reads_exports_and_updates_country_counts(
 
     def analyze(input_path, output_dir, geo_db, input_options=None, *,
                 catalogue_path=None, batch_size=1000, max_batches=None,
-                on_progress=None, cancel_requested=None, keep_checkpoint=False):
+                on_progress=None, on_event=None, cancel_requested=None, keep_checkpoint=False):
         assert threading.get_ident() != gui_ident
         assert input_path == tmp_path / 'synthetic.csv'
         assert geo_db == tmp_path / 'synthetic.db'
@@ -142,6 +142,7 @@ def test_analyze_passes_normal_inputs_reads_exports_and_updates_country_counts(
                                  'address_columns': ['NAME_ADDRESS_LINE1']}
         assert catalogue_path is None
         assert callable(cancel_requested)
+        assert callable(on_event)
         on_progress(6)
         output_dir.mkdir()
         (output_dir / 'Run_Manifest.json').write_text(json.dumps(report()), encoding='utf-8')
@@ -344,7 +345,7 @@ def test_cancel_is_resumable_and_resume_uses_output_folder(window, tmp_path, app
         return report('CANCELLED')
 
     def resume(output_dir, *, max_batches=None, on_progress=None,
-               cancel_requested=None, keep_checkpoint=False):
+               on_event=None, cancel_requested=None, keep_checkpoint=False):
         assert output_dir == tmp_path / 'export'
         assert threading.get_ident() != gui_ident
         return report()
@@ -584,6 +585,14 @@ def test_real_runner_publishes_country_table_and_pack_version(window, tmp_path, 
     assert 'Unresolved: 1' in window.summary.text()
     assert 'GeoNames: sha256:' in window.source_versions.text()
     assert not (tmp_path / 'export' / '.country-state').exists()
+    assert window.results.pending_value.text() == '1'
+    assert window.results.case_table.rowCount() == 1
+    assert window.results.case_table.item(0, 0).text() == '3'
+    assert window.results.case_table.item(0, 4).text() == 'EMPTY_ADDRESS'
+    assert 'not accuracy' in window.results.performance.text()
+    assert not window.input_toggle.isChecked()
+    window.input_toggle.click()
+    assert window.input_toggle.isChecked()
 
 
 def test_real_runner_cancel_callback_preserves_checkpoint_for_resume(
@@ -619,3 +628,87 @@ def test_real_runner_cancel_callback_preserves_checkpoint_for_resume(
     assert window.job_state == 'done', window.log.toPlainText()
     assert window.counts.item(0, 0).text() == 'JP'
     assert not (tmp_path / 'export' / '.country-state').exists()
+
+
+def test_detailed_status_timer_and_stage_percentage_are_honest(window, tmp_path, app, monkeypatch):
+    configure(window, tmp_path)
+    entered, release = threading.Event(), threading.Event()
+
+    def analyze(*args, on_event=None, **kwargs):
+        on_event({'stage': 'hashing_pack', 'processed': 0, 'committed': 0})
+        entered.set()
+        release.wait(5)
+        return report()
+
+    install_runner(monkeypatch, analyze)
+    try:
+        window.start_job()
+        wait(app, entered.is_set)
+        wait(app, lambda: 'reference database' in window.activity.text().lower())
+        assert window.progress.maximum() == 0
+        before = window.activity.text()
+        wait(app, lambda: window.activity.text() != before, timeout=2)
+        window._on_stage_event({'stage': 'exporting', 'processed': 5, 'committed': 6, 'total': 6})
+        assert 0 < window.progress.value() < window.progress.maximum()
+        assert '5 / 6' in window.activity.text()
+        window._on_stage_event({'stage': 'classifying', 'processed': 6, 'committed': 6, 'total': 6})
+        assert window.progress.value() < window.progress.maximum()
+    finally:
+        release.set()
+        wait(app, lambda: not window.busy)
+    assert window.progress.value() == window.progress.maximum()
+    assert not window._activity_timer.isActive()
+
+
+def test_real_case_filter_and_export_run_off_gui_thread(window, tmp_path, app, monkeypatch):
+    from tests.unit.test_retrieve import geo
+    from world_address_engine.gui import country_cases
+    configure(window, tmp_path)
+    window.geo_db.setText(str(geo(tmp_path)))
+    (tmp_path / 'synthetic.csv').write_text('NAME_ADDRESS_LINE1,ID\nJapan,001\n,002\n', encoding='utf-8')
+    window.start_job()
+    wait(app, lambda: not window.busy)
+    assert window.results.case_table.rowCount() == 1
+    assert window.results.pending_value.text() == '1'
+    calls = []
+    original = country_cases.load_case_page
+
+    def load(*args, **kwargs):
+        calls.append(threading.get_ident())
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(country_cases, 'load_case_page', load)
+    window.results.case_filter.setCurrentIndex(2)
+    wait(app, lambda: not window.busy)
+    assert window.results.case_table.rowCount() == 2
+    assert calls and all(ident != threading.get_ident() for ident in calls)
+    destination = tmp_path / 'selected-cases.csv'
+    window.export_case_filter('pending', destination)
+    wait(app, lambda: not window.busy)
+    assert destination.is_file()
+    assert window.job_state == 'done'
+    assert '1 cases' in window.statusBar().currentMessage()
+    assert 'Japan' not in window.log.toPlainText()
+
+
+def test_new_analysis_and_failure_discard_previous_case_details(window, tmp_path, app, monkeypatch):
+    from tests.unit.test_retrieve import geo
+    configure(window, tmp_path)
+    window.geo_db.setText(str(geo(tmp_path)))
+    (tmp_path / 'synthetic.csv').write_text('NAME_ADDRESS_LINE1,ID\n,001\n', encoding='utf-8')
+    window.start_job()
+    wait(app, lambda: not window.busy)
+    assert window.results.case_table.rowCount() == 1
+
+    def fail(*args, **kwargs):
+        raise OSError('Synthetic failure')
+
+    install_runner(monkeypatch, fail)
+    window.output_dir.setText(str(tmp_path / 'different-empty'))
+    window.start_job()
+    wait(app, lambda: not window.busy)
+    assert window.job_state == 'failed'
+    assert window.results.case_table.rowCount() == 0
+    assert window.results.pending_value.text() == '-'
+    assert not window.results.export_button.isEnabled()
+    assert not window._activity_timer.isActive()

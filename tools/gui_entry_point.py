@@ -77,6 +77,11 @@ def report_errors(report, *, expected_version: str, require_frozen: bool = False
     }
     if report.get('country_analysis') != expected_country:
         errors.append('country_analysis')
+    expected_feedback = {'icon_loaded': True, 'stage_events_observed': True,
+                         'summary_total': '4', 'summary_pending': '1',
+                         'pending_rows': 1, 'first_pending_record': '4'}
+    if report.get('gui_feedback') != expected_feedback:
+        errors.append('gui_feedback')
     for name, rows in (('preview', 9604), ('xlsx_preview', 1)):
         preview = report.get(name)
         shape = {'total_records': rows, 'original_columns': 12,
@@ -164,7 +169,7 @@ def self_test() -> dict:
                 report['classification_error'] = str(exc)
             report['classification_output_created'] = output.exists()
             from world_address_engine.data.country_codes import load_country_codes
-            from world_address_engine.gui.country_app import CountryAnalysisWindow
+            from world_address_engine.gui.country_app import CountryAnalysisWindow, _read_country_export
             from world_address_engine.jobs.country_analysis import analyze_job
             from world_address_engine.matching.normalize import _converter
 
@@ -178,9 +183,26 @@ def self_test() -> dict:
                     writer.writerow(['Address', 'Control no'])
                     for index, address in enumerate(('Hong Kong', 'China', 'Japan', ''), 1):
                         writer.writerow([address, f'{index:04d}'])
+                stage_events = []
+                country_output = work / 'country-output'
                 country_report = analyze_job(
-                    country_input, work / 'country-output', geo_db,
-                    {'address_columns': ['Address']})
+                    country_input, country_output, geo_db,
+                    {'address_columns': ['Address']}, on_event=stage_events.append)
+                country_window._output_dir = country_output
+                country_window._apply_analysis(_read_country_export(country_output, country_report))
+                app.processEvents()
+                stages = {event['stage'] for event in stage_events}
+                panel = country_window.results
+                report['gui_feedback'] = {
+                    'icon_loaded': not country_window.windowIcon().isNull(),
+                    'stage_events_observed': {'validating', 'hashing_pack', 'classifying',
+                                              'exporting', 'finalizing', 'complete'} <= stages,
+                    'summary_total': panel.total_value.text(),
+                    'summary_pending': panel.pending_value.text(),
+                    'pending_rows': panel.case_table.rowCount(),
+                    'first_pending_record': panel.case_table.item(0, 0).text()
+                    if panel.case_table.rowCount() else None,
+                }
                 report['country_analysis'] = {
                     'window_shown': country_window.isVisible(),
                     'mapping_entries': len(load_country_codes().entries),
