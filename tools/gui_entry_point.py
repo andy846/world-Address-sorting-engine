@@ -22,6 +22,25 @@ EXCLUDED_PACK_PATTERNS = ('geonames-*', '*.sqlite', '*.db', '*.sqlite.*', '*.db.
 APPROVAL_REFUSAL = 'a signed HKP approval manifest and key are required for a production run'
 
 
+def running_version() -> str:
+    """Return the version of the code that is actually running.
+
+    Installed distribution metadata can lag behind the source tree (an editable
+    or stale install), so the bundle must attest to its own code version.
+    """
+    from world_address_engine import __version__
+
+    return __version__
+
+
+def installed_metadata_version() -> str | None:
+    """Return the installed distribution version for diagnostics only."""
+    try:
+        return version(DISTRIBUTION)
+    except Exception:
+        return None
+
+
 def excluded_pack_paths(names) -> list[str]:
     """Match components, including nested paths and Windows archive separators."""
     return sorted(str(name) for name in names if any(
@@ -80,8 +99,9 @@ def self_test() -> dict:
     bundled = excluded_pack_paths(
         path.relative_to(extraction) for path in Path(extraction).rglob('*')
     ) if extraction is not None else []
-    project_version = version(DISTRIBUTION)
+    project_version = running_version()
     report = {'schema_version': 1, 'version': project_version,
+              'distribution_metadata_version': installed_metadata_version(),
               'rules_version': RULES_VERSION, 'frozen': bool(getattr(sys, 'frozen', False)),
               'pack_bundled': bool(bundled), 'bundled_pack_paths': bundled,
               'classification_attempted': False, 'approval_refused': False}

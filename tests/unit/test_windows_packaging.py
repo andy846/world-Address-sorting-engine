@@ -167,6 +167,33 @@ def test_self_test_exercises_the_window_runner_and_previews(runtime_report):
     assert runtime_report['version'] == project['project']['version']
 
 
+def test_self_test_reports_the_running_code_version_not_stale_installed_metadata(monkeypatch):
+    """The bundle must attest to the code that is running, not to install metadata.
+
+    An editable or stale install leaves ``importlib.metadata`` pointing at an
+    older release, which previously made the self-test report a version that
+    the running code did not actually have.
+    """
+    pytest.importorskip('PySide6')
+    import world_address_engine
+
+    monkeypatch.setattr(entry, 'version', lambda name: '0.0.0-stale-install-metadata')
+    report = entry.self_test()
+    assert isinstance(report, dict)
+    assert report['version'] == world_address_engine.__version__
+    assert report['version'] != '0.0.0-stale-install-metadata'
+    assert report['ok'] is True
+
+
+def test_the_release_version_authority_is_consistent():
+    """pyproject, the package and the packaged bundle must agree on one version."""
+    import world_address_engine
+
+    project = tomllib.loads((REPO_ROOT / 'pyproject.toml').read_text('utf-8'))
+    assert project['project']['version'] == world_address_engine.__version__
+    assert packaging.project_version() == world_address_engine.__version__
+
+
 @pytest.mark.parametrize('name', ['nested/hidden.sqlite', 'nested/PACK.DB',
                                  'Geonames-secret/payload',
                                  'nested/compact_global.sqlite.zip',
