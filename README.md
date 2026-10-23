@@ -19,6 +19,11 @@ service-only `CNS` entry is excluded. These reference codes have their own
 namespace (for example Kosovo `XO`), so they are not blindly copied from ISO.
 The PDF parser is not required at runtime.
 
+The feature branch includes additional 2026-10-24 context fixes for HK district
+abbreviations, Jordan, building/street names and per-place evidence weights.
+These are not a replacement of the already published alpha.2 release. See
+`docs/COUNTRY_CONTEXT_FINETUNING_2026-10-24.md` for validation and limitations.
+
 ```powershell
 world-address-engine analyze --input "sample.csv" --output "sample-country-analysis" --geo-db "packs/geonames-extended-global-2026-10-22-k2/pack.db"
 world-address-engine resume --job-dir "sample-country-analysis"

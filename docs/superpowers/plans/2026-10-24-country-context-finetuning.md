@@ -21,18 +21,22 @@ docs/superpowers/plans/2026-10-23-country-code-analysis.md.
 
 ## Tasks
 
-- [ ] Reproduce building-country, Jordan/HK, contextual TST/Central/Admiralty and
+- [x] Reproduce building-country, Jordan/HK, contextual TST/Central/Admiralty and
   mainland/border-region failures with synthetic RED tests; include genuine
   overseas counterparts and ambiguous bare district/abbreviation negatives.
-- [ ] Implement occurrence-level/context fixes and mainland admin precedence;
+- [x] Implement occurrence-level/context fixes and mainland admin precedence;
   run country, runner/resume and GUI regressions; commit the verified fix.
-- [ ] Independent review of evidence filtering and final changed code. Fix
+- [x] Independent review of evidence filtering and final changed code. Fix
   concrete important findings with RED-to-GREEN regressions.
-- [ ] Re-run the entire private input to a new output directory. Reconcile
+- [x] Re-run the entire private input to a new output directory. Reconcile
   counts/fields/IDs/duplicates, compare every changed code, record only aggregate
   performance and before/after results in public documentation.
 - [ ] Full real-pack regression and Windows frozen self-test; push the existing
   draft PR for GitHub checks. Do not merge main or replace a published release.
+
+Local full regression and frozen self-test passed. Final task remains open until
+the verified branch is pushed and GitHub checks finish; evidence is recorded in
+docs/COUNTRY_CONTEXT_FINETUNING_2026-10-24.md.
 
 ## Review Focus
 
