@@ -297,3 +297,11 @@ the k2 Simplified Chinese Hong Kong SAR alias is missing (two expected-failure
 regressions); 1M/5M benchmarks, onedir runtime and clean offline operator
 acceptance are outstanding. Alpha.1 is a TEST ONLY prerelease.
 
+First publication run `39920083864` at `6c91da0` downloaded, SHA-verified and
+installed both real packs successfully. Linux regression exposed a missing
+CI dependency: its install omitted the `packaging` extra, so the unreadable
+archive test stopped at the missing-PyInstaller guard (630 passed, 52 skipped,
+2 xfailed, 1 failed). The Linux release job now installs `.[excel,packaging,test]`
+to exercise archive checks instead of skipping them. No release was published
+by that failed run.
+

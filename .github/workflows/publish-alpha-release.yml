@@ -50,7 +50,7 @@ jobs:
         run: test "${GITHUB_REF}" = "refs/heads/feat/hkp-trilingual-phase1"
 
       - name: Install development and release dependencies
-        run: python -m pip install -e ".[excel,test]"
+        run: python -m pip install -e ".[excel,packaging,test]"
 
       - name: Verify package and release versions agree
         run: |
