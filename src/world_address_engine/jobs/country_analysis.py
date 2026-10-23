@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+from time import monotonic
 
 from world_address_engine.data.country_codes import load_country_codes
 from world_address_engine.data.pack_registry import require_readable_pack
@@ -26,6 +27,40 @@ FINALIZATION_DIR = '.country-finalize'
 
 class _Cancelled(Exception):
     pass
+
+
+class _StageProgress:
+    """Bound notifications without retaining records or delaying cancellation."""
+
+    def __init__(self, callback):
+        self.callback = callback
+        self.stage = None
+        self.processed = 0
+        self.started_at = 0
+        self.reported_work = False
+        self.last_time = 0.0
+
+    def emit(self, stage, processed=0, committed=0, *, total=None,
+             status_counts=None, force=False):
+        changed = stage != self.stage
+        if changed:
+            self.started_at = processed
+            self.reported_work = False
+        self.stage, self.processed = stage, processed
+        if self.callback is None:
+            return
+        now = monotonic()
+        first = not self.reported_work and processed > self.started_at
+        if not (changed or first or force or now - self.last_time >= 0.25):
+            return
+        self.last_time = now
+        self.reported_work |= first
+        event = {'stage': stage, 'processed': processed, 'committed': committed}
+        if total is not None:
+            event['total'] = total
+        if status_counts is not None:
+            event['status_counts'] = dict(status_counts)
+        self.callback(event)
 
 
 def _json_hash(value) -> str:
@@ -116,7 +151,7 @@ def _catalogue_metadata(catalogue) -> dict:
             'catalogue_fingerprint': catalogue.fingerprint}
 
 
-def _assert_sources_unchanged(cfg: dict) -> None:
+def _assert_sources_unchanged(cfg: dict, *, on_event=None) -> None:
     if cfg.get('job_kind') != JOB_KIND or cfg.get('schema_version') != STATE_VERSION:
         raise ValueError('unsupported country checkpoint version or kind')
     if cfg.get('rules_version') != COUNTRY_RULES_VERSION:
@@ -125,8 +160,13 @@ def _assert_sources_unchanged(cfg: dict) -> None:
         raise ValueError('input options profile changed since checkpoint')
     for label, path_key, hash_key in (('input', 'input_path', 'input_sha256'),
                                        ('geo pack', 'geo_db', 'geo_sha256')):
+        if on_event is not None:
+            on_event({'stage': 'hashing_input' if label == 'input' else 'hashing_pack',
+                      'processed': 0, 'committed': 0})
         if file_sha256(Path(cfg[path_key])) != cfg[hash_key]:
             raise ValueError(f'{label} changed since country checkpoint')
+    if on_event is not None:
+        on_event({'stage': 'loading', 'processed': 0, 'committed': 0})
     for key, value in _pack_metadata(Path(cfg['geo_db']), cfg['geo_sha256']).items():
         if cfg.get(key) != value:
             raise ValueError('geo pack version or profile changed since checkpoint')
@@ -176,7 +216,9 @@ def _saved_pairs(paths, rules_version):
         previous_digest = expected_digest
 
 
-def _verified_pairs(paths, source, classifier, *, complete=False, cancel_requested=None):
+def _verified_pairs(paths, source, classifier, *, complete=False, cancel_requested=None,
+                    on_progress=None):
+    processed = 0
     with closing(_saved_pairs(paths, COUNTRY_RULES_VERSION)) as saved:
         for saved_record, saved_result in saved:
             if cancel_requested is not None and cancel_requested():
@@ -187,6 +229,9 @@ def _verified_pairs(paths, source, classifier, *, complete=False, cancel_request
             fresh = classifier.classify(original)
             if fresh != saved_result:
                 raise ValueError('country checkpoint verification failed: fresh inference mismatch')
+            processed += 1
+            if on_progress is not None:
+                on_progress(processed)
             yield original, fresh
     if complete and next(source, None) is not None:
         raise ValueError('country checkpoint verification failed: omitted source records')
@@ -207,8 +252,10 @@ def _limits(batch_size: int, max_batches: int | None) -> None:
         raise ValueError('max_batches must be positive')
 
 
-def _process(output: Path, cfg: dict, *, max_batches=None, on_progress=None,
+def _process(output: Path, cfg: dict, *, max_batches=None, on_progress=None, on_event=None,
              cancel_requested=None, keep_checkpoint=False) -> dict:
+    progress = _StageProgress(on_event)
+    progress.emit('loading')
     state = output / '.country-state'
     paths, last_committed = committed_shards(state, expected_rules_version=COUNTRY_RULES_VERSION)
     catalogue = load_country_codes(Path(cfg['catalogue_path']) if cfg['catalogue_path'] else None)
@@ -237,11 +284,18 @@ def _process(output: Path, cfg: dict, *, max_batches=None, on_progress=None,
             if classifier.rules_version != cfg['rules_version']:
                 raise ValueError('country classifier rules version changed')
             # Restore only after comparing each committed record and inference.
+            progress.emit('restoring', committed=last_committed, total=last_committed)
             with closing(_verified_pairs(paths, source, classifier,
-                                         cancel_requested=cancel_requested)) as restored:
+                                         cancel_requested=cancel_requested,
+                                         on_progress=lambda count: progress.emit(
+                                             'restoring', count, last_committed,
+                                             total=last_committed))) as restored:
                 for record, _ in restored:
                     if sparse_columns and len(record.fields) > len(columns):
                         columns = list(record.fields)
+            progress.emit('restoring', last_committed, last_committed,
+                          total=last_committed, force=True)
+            progress.emit('classifying', last_committed, last_committed)
             for record in source:
                 check_cancel()
                 if record.record_no != last_committed + len(batch) + 1:
@@ -249,23 +303,36 @@ def _process(output: Path, cfg: dict, *, max_batches=None, on_progress=None,
                 if sparse_columns and len(record.fields) > len(columns):
                     columns = list(record.fields)
                 batch.append((record, classifier.classify(record)))
+                progress.emit('classifying', record.record_no, last_committed)
                 if len(batch) >= cfg['batch_size']:
                     commit()
                     check_cancel()
                     if max_batches is not None and batches >= max_batches:
+                        progress.emit('classifying', last_committed, last_committed, force=True)
+                        progress.emit('paused', last_committed, last_committed)
                         return {'run_status': 'PAUSED', 'job_kind': JOB_KIND,
                                 'committed_records': last_committed}
             check_cancel()
             if batch:
                 commit()
+            progress.emit('classifying', last_committed, last_committed,
+                          total=last_committed, force=True)
+            progress.emit('verifying_sources', last_committed, last_committed,
+                          total=last_committed)
+            check_cancel()
             _assert_sources_unchanged(cfg)
             paths, last_committed = committed_shards(state, expected_rules_version=COUNTRY_RULES_VERSION)
             metadata = {key: cfg[key] for key in (
                 'rules_version', 'catalogue_version', 'catalogue_sha256', 'catalogue_fingerprint',
                 'input_sha256', 'geo_sha256', 'geo_manifest_sha256', 'geo_pack_version',
                 'pack_format_version', 'profile', 'input_options_sha256', 'batch_size')}
+            metadata['address_columns'] = cfg['input_options']['address_columns']
 
             def before_manifest():
+                progress.emit('exporting', last_committed, last_committed,
+                              total=last_committed, force=True)
+                progress.emit('finalizing', last_committed, last_committed,
+                              total=last_committed)
                 _assert_sources_unchanged(cfg)
                 check_cancel()
                 if not keep_checkpoint:
@@ -277,9 +344,13 @@ def _process(output: Path, cfg: dict, *, max_batches=None, on_progress=None,
                     atomic_json(recovery / 'config.json', cfg)
                     _remove_checkpoint(state)
 
+            progress.emit('exporting', committed=last_committed, total=last_committed)
             with closing(iter(_records(Path(cfg['input_path']), cfg['input_options']))) as originals, \
                     closing(_verified_pairs(paths, originals, classifier, complete=True,
-                                            cancel_requested=cancel_requested)) as verified:
+                                            cancel_requested=cancel_requested,
+                                            on_progress=lambda count: progress.emit(
+                                                'exporting', count, last_committed,
+                                                total=last_committed))) as verified:
                 result = write_country_reports(
                     verified, output, catalogue, metadata,
                     original_columns=columns, allow_sparse_columns=sparse_columns,
@@ -287,8 +358,11 @@ def _process(output: Path, cfg: dict, *, max_batches=None, on_progress=None,
             recovery = output / FINALIZATION_DIR
             if recovery.exists():
                 shutil.rmtree(recovery)
+            progress.emit('complete', last_committed, last_committed, total=last_committed,
+                          status_counts=result['status_counts'])
             return result
     except _Cancelled:
+        progress.emit('cancelled', progress.processed, last_committed)
         return {'run_status': 'CANCELLED', 'job_kind': JOB_KIND,
                 'committed_records': last_committed}
     finally:
@@ -297,13 +371,16 @@ def _process(output: Path, cfg: dict, *, max_batches=None, on_progress=None,
 
 def analyze_job(input_path, output_dir, geo_db, input_options: dict | None = None, *,
                 catalogue_path=None, batch_size=1000, max_batches=None,
-                on_progress=None, cancel_requested=None, keep_checkpoint=False) -> dict:
-    """Start a country estimate. Callbacks receive committed count / return cancel bool.
+                on_progress=None, on_event=None, cancel_requested=None, keep_checkpoint=False) -> dict:
+    """Start an estimate with integer commit progress and optional count-only events.
 
     A new job requires an empty output directory. PAUSED and CANCELLED results
     leave source-bound sensitive state for resume_analysis; COMPLETE removes it
-    unless keep_checkpoint is explicitly enabled.
+    unless keep_checkpoint is explicitly enabled. Event processed counts belong
+    to the current stage; total is omitted until known without a counting pass.
     """
+    progress = _StageProgress(on_event)
+    progress.emit('validating')
     input_path, output, geo_db = map(Path, (input_path, output_dir, geo_db))
     if output.exists() and any(output.iterdir()):
         raise FileExistsError('existing output directory; resume analysis or choose an empty directory')
@@ -314,14 +391,18 @@ def analyze_job(input_path, output_dir, geo_db, input_options: dict | None = Non
             raise FileNotFoundError(path)
     input_path, geo_db = input_path.resolve(), geo_db.resolve()
     _preflight_input(input_path, options)
+    progress.emit('hashing_input')
+    input_digest = file_sha256(input_path)
+    progress.emit('hashing_pack')
+    geo_digest = file_sha256(geo_db)
+    progress.emit('loading')
     catalogue_path = Path(catalogue_path).resolve() if catalogue_path is not None else None
     catalogue = load_country_codes(catalogue_path)
-    geo_digest = file_sha256(geo_db)
     cfg = {'job_kind': JOB_KIND, 'schema_version': STATE_VERSION,
            'rules_version': COUNTRY_RULES_VERSION, 'batch_size': batch_size,
            'input_path': str(input_path), 'geo_db': str(geo_db),
            'catalogue_path': str(catalogue_path) if catalogue_path is not None else None,
-           'input_sha256': file_sha256(input_path), 'geo_sha256': geo_digest,
+           'input_sha256': input_digest, 'geo_sha256': geo_digest,
            'input_options': options, 'input_options_sha256': _json_hash(options),
            **_pack_metadata(geo_db, geo_digest), **_catalogue_metadata(catalogue)}
     output.mkdir(parents=True, exist_ok=True)
@@ -332,12 +413,15 @@ def analyze_job(input_path, output_dir, geo_db, input_options: dict | None = Non
     _private_directory(state)
     atomic_json(state / 'config.json', cfg)
     return _process(output, cfg, max_batches=max_batches, on_progress=on_progress,
+                    on_event=on_event,
                     cancel_requested=cancel_requested, keep_checkpoint=keep_checkpoint)
 
 
-def resume_analysis(output_dir, *, max_batches=None, on_progress=None,
+def resume_analysis(output_dir, *, max_batches=None, on_progress=None, on_event=None,
                     cancel_requested=None, keep_checkpoint=False) -> dict:
     """Resume with mandatory source, catalogue, pack, profile and inference checks."""
+    progress = _StageProgress(on_event)
+    progress.emit('validating')
     output = Path(output_dir)
     if (output / 'Run_Manifest.json').exists():
         raise FileExistsError('completed country analysis is immutable')
@@ -348,7 +432,7 @@ def resume_analysis(output_dir, *, max_batches=None, on_progress=None,
         config_path = output / FINALIZATION_DIR / 'config.json'
     cfg = json.loads(config_path.read_text(encoding='utf8'))
     _limits(cfg['batch_size'], max_batches)
-    _assert_sources_unchanged(cfg)
+    _assert_sources_unchanged(cfg, on_event=on_event)
     if restore_config:
         # A failed finalization has no authoritative row checkpoint left.
         # Rebuild and verify every report from the unchanged original source.
@@ -358,4 +442,5 @@ def resume_analysis(output_dir, *, max_batches=None, on_progress=None,
     if restore_config:
         atomic_json(state / 'config.json', cfg)
     return _process(output, cfg, max_batches=max_batches, on_progress=on_progress,
+                    on_event=on_event,
                     cancel_requested=cancel_requested, keep_checkpoint=keep_checkpoint)
