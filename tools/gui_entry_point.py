@@ -79,6 +79,7 @@ def report_errors(report, *, expected_version: str, require_frozen: bool = False
         errors.append('country_analysis')
     expected_feedback = {'icon_loaded': True, 'stage_events_observed': True,
                          'address_line_order_preserved': True,
+                         'workbench_ready': True,
                          'summary_total': '4', 'summary_pending': '1',
                          'pending_rows': 1, 'first_pending_record': '4'}
     if report.get('gui_feedback') != expected_feedback:
@@ -184,6 +185,11 @@ def self_test() -> dict:
                 country_window.address_columns.clear()
                 country_window.show()
                 app.processEvents()
+                workbench_ready = (
+                    country_window.workbench.count() == 2
+                    and country_window.workbench.widget(0) is country_window.settings_scroll
+                    and country_window.settings_scroll.widget() is country_window.inputs
+                    and not country_window.diagnostics.isVisible())
                 country_input = work / 'country-synthetic.csv'
                 with country_input.open('w', encoding='utf-8-sig', newline='') as stream:
                     writer = csv.writer(stream)
@@ -200,9 +206,14 @@ def self_test() -> dict:
                 app.processEvents()
                 stages = {event['stage'] for event in stage_events}
                 panel = country_window.results
+                workbench_ready = (workbench_ready
+                                   and len(panel.metric_cards) == 4
+                                   and '4' in panel.total_value.accessibleName()
+                                   and '1' in panel.pending_value.accessibleName())
                 report['gui_feedback'] = {
                     'icon_loaded': not country_window.windowIcon().isNull(),
                     'address_line_order_preserved': line_order_preserved,
+                    'workbench_ready': workbench_ready,
                     'stage_events_observed': {'validating', 'hashing_pack', 'classifying',
                                               'exporting', 'finalizing', 'complete'} <= stages,
                     'summary_total': panel.total_value.text(),

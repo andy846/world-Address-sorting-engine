@@ -215,6 +215,7 @@ def test_bundle_proves_icon_progress_and_completed_pending_case_view(runtime_rep
     feedback = runtime_report['gui_feedback']
     assert feedback == {'icon_loaded': True, 'stage_events_observed': True,
                         'address_line_order_preserved': True,
+                        'workbench_ready': True,
                         'summary_total': '4', 'summary_pending': '1',
                         'pending_rows': 1, 'first_pending_record': '4'}
     broken = dict(runtime_report)
@@ -227,6 +228,28 @@ def test_frozen_self_test_proves_click_order_does_not_reorder_address_lines(runt
     broken = dict(runtime_report)
     broken['gui_feedback'] = dict(runtime_report['gui_feedback'], address_line_order_preserved=False)
     assert 'gui_feedback' in entry.report_errors(broken, expected_version=packaging.project_version())
+
+
+def test_frozen_self_test_proves_native_workbench_and_hidden_diagnostics(runtime_report):
+    assert runtime_report['gui_feedback']['workbench_ready'] is True
+    broken = dict(runtime_report)
+    broken['gui_feedback'] = dict(runtime_report['gui_feedback'], workbench_ready=False)
+    assert 'gui_feedback' in entry.report_errors(broken, expected_version=packaging.project_version())
+
+
+def test_frozen_workbench_gate_rejects_metric_names_without_the_numbers(monkeypatch):
+    pytest.importorskip('PySide6')
+    from world_address_engine.gui.country_results import CountryResultsPanel
+    original = CountryResultsPanel._set_metric_value
+
+    def missing_number(panel, name, text):
+        original(panel, name, text)
+        getattr(panel, f'{name}_value').setAccessibleName(panel._metric_captions[name])
+
+    monkeypatch.setattr(CountryResultsPanel, '_set_metric_value', missing_number)
+    report = entry.self_test()
+    assert report['ok'] is False
+    assert 'gui_feedback' in report['assertion_failures']
 
 
 def test_bundle_requires_offline_chinese_normalization_data(monkeypatch):

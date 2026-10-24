@@ -9,18 +9,12 @@ from functools import partial
 from pathlib import Path
 from time import monotonic
 
-from PySide6.QtCore import Qt, Signal, Slot, QUrl, QTimer
+from PySide6.QtCore import QEvent, Qt, Signal, Slot, QUrl, QTimer
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import (
-    QAbstractItemView, QComboBox, QFileDialog, QFormLayout, QGroupBox,
-    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QListWidget, QMainWindow,
-    QProgressBar, QPushButton, QTableWidget, QTableWidgetItem, QTextEdit,
-    QVBoxLayout, QWidget,
-)
+from PySide6.QtWidgets import QFileDialog, QMainWindow, QTableWidgetItem
 
 from world_address_engine.gui.app import WorkerThread, _LIVE_THREADS, _thread_finished
 from world_address_engine.gui.branding import apply_branding
-from world_address_engine.gui.country_results import CountryResultsPanel
 
 STAGE_NAMES = {
     'preview': 'Reading input and checking address columns',
@@ -131,7 +125,7 @@ class CountryAnalysisWindow(QMainWindow):
         super().__init__()
         apply_branding(self)
         self.setWindowTitle('World Address Sorting Engine - Country Code Analysis')
-        self.resize(1040, 800)
+        self.resize(1280, 820)
         self._thread = None
         self._worker_pending = False
         self._cancel = threading.Event()
@@ -154,101 +148,14 @@ class CountryAnalysisWindow(QMainWindow):
         self._build()
 
     def _build(self) -> None:
-        central = QWidget()
-        layout = QVBoxLayout(central)
-        self.input_toggle = QPushButton('Hide input settings')
-        self.input_toggle.setCheckable(True)
-        self.input_toggle.setChecked(True)
-        self.input_toggle.toggled.connect(self._toggle_inputs)
-        layout.addWidget(self.input_toggle, 0, Qt.AlignmentFlag.AlignLeft)
-        self.inputs = QGroupBox('Address input and offline reference data')
-        form = QFormLayout(self.inputs)
-        self.input_path = QLineEdit()
-        self.output_dir = QLineEdit()
-        self.output_dir.setPlaceholderText('Defaults to <input file>-country-analysis')
-        self.geo_db = QLineEdit(_discover_geo_pack())
-        self.geo_db.setPlaceholderText('Choose an installed GeoNames pack; no download is needed')
-        for label, edit, button_text, callback in (
-            ('Address file', self.input_path, 'Choose file...', self._choose_input),
-            ('Output folder', self.output_dir, 'Choose folder...', self._choose_output),
-            ('GeoNames pack', self.geo_db, 'Choose pack...', self._choose_geo_db),
-        ):
-            row = QHBoxLayout()
-            row.addWidget(edit, 1)
-            button = QPushButton(button_text)
-            button.clicked.connect(callback)
-            row.addWidget(button)
-            form.addRow(label, row)
-        self.encoding = QComboBox()
-        self.encoding.setEditable(True)
-        self.encoding.addItems(['utf-8-sig', 'utf-8', 'big5', 'gb18030', 'cp1252'])
-        form.addRow('Encoding', self.encoding)
-        self.sheet_name = QLineEdit()
-        self.sheet_name.setPlaceholderText('XLSX only; blank uses the first worksheet')
-        form.addRow('Worksheet', self.sheet_name)
-        self.address_columns = QListWidget()
-        self.address_columns.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
-        self.address_columns.setMinimumHeight(110)
-        self.address_columns.setMaximumHeight(160)
-        self.input_path.textChanged.connect(self.address_columns.clear)
-        form.addRow('Address columns', self.address_columns)
-        self.column_selection = QLabel()
-        self.column_selection.setWordWrap(True)
-        self.address_columns.itemSelectionChanged.connect(self._update_column_selection)
-        self._update_column_selection()
-        form.addRow('', self.column_selection)
-        form.addRow(QLabel('Country catalogue: packaged catalogue (automatic)'))
-        layout.addWidget(self.inputs)
+        from world_address_engine.gui.country_layout import build_workbench
+        build_workbench(self, _discover_geo_pack)
 
-        buttons = QHBoxLayout()
-        for name, text, callback in (
-            ('preview_button', 'Preview / load columns', self.preview_input),
-            ('run_button', 'Analyze countries', self.start_job),
-            ('resume_button', 'Resume', self.resume_job),
-            ('cancel_button', 'Cancel', self.cancel_job),
-        ):
-            button = QPushButton(text)
-            button.clicked.connect(callback)
-            setattr(self, name, button)
-            buttons.addWidget(button)
-        self.cancel_button.setEnabled(False)
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 1)
-        buttons.addWidget(self.progress, 1)
-        layout.addLayout(buttons)
-        self.preview_summary = QLabel('Preview reads the input offline without displaying addresses.')
-        self.preview_summary.setWordWrap(True)
-        layout.addWidget(self.preview_summary)
-        self.summary = QLabel('No analysis loaded. Determined, inferred, and unresolved records will appear here.')
-        self.summary.setWordWrap(True)
-        layout.addWidget(self.summary)
-        self.activity = QLabel('Ready. All address processing stays on this computer.')
-        self.activity.setWordWrap(True)
-        layout.addWidget(self.activity)
-        self.results = CountryResultsPanel()
-        self.counts = self.results.counts
-        self.results.pageRequested.connect(self._load_cases)
-        self.results.exportRequested.connect(self._choose_case_export)
-        layout.addWidget(self.results, 1)
-        self.source_versions = QLabel('No source versions loaded.')
-        self.source_versions.setWordWrap(True)
-        layout.addWidget(self.source_versions)
-        export = QHBoxLayout()
-        self.export_location = QLabel('No export yet.')
-        self.export_location.setWordWrap(True)
-        self.export_location.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        export.addWidget(self.export_location, 1)
-        self.open_output_button = QPushButton('Open output folder')
-        self.open_output_button.setEnabled(False)
-        self.open_output_button.clicked.connect(self.open_output_folder)
-        export.addWidget(self.open_output_button)
-        layout.addLayout(export)
-        self.log = QTextEdit()
-        self.log.setReadOnly(True)
-        self.log.setMaximumHeight(95)
-        layout.addWidget(self.log)
-        self.setCentralWidget(central)
-        self.statusBar().showMessage('Ready for offline country analysis.')
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.FontChange and hasattr(self, 'results'):
+            from world_address_engine.gui.presentation import sync_workbench_fonts
+            sync_workbench_fonts(self)
 
     def _choose_input(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -259,8 +166,17 @@ class CountryAnalysisWindow(QMainWindow):
             self.preview_input()
 
     def _toggle_inputs(self, visible):
+        if not visible:
+            self._sidebar_width = self.workbench.sizes()[0]
         self.inputs.setVisible(visible)
+        self.settings_scroll.setVisible(visible)
+        if visible:
+            width = getattr(self, '_sidebar_width', 320)
+            self.workbench.setSizes([width, max(400, self.workbench.width() - width)])
         self.input_toggle.setText('Hide input settings' if visible else 'Show input settings')
+
+    def _toggle_diagnostics(self, visible):
+        self.diagnostics.setVisible(visible)
 
     def _choose_output(self) -> None:
         path = QFileDialog.getExistingDirectory(self, 'Choose the output folder')
@@ -372,6 +288,9 @@ class CountryAnalysisWindow(QMainWindow):
         self.progress.setRange(0, 1)
         self.progress.setFormat('%p%')
         self.progress.setValue(int(self._job_state == 'done'))
+        self.progress_percent.setText('100%' if self._job_state == 'done' else 'Ready')
+        self.stage_badge.setText({'done': 'COMPLETE', 'failed': 'FAILED', 'paused': 'PAUSED',
+                                 'cancelled': 'CANCELLED'}.get(self._job_state, 'READY'))
         if self._closing:
             self.close()
 
@@ -396,8 +315,10 @@ class CountryAnalysisWindow(QMainWindow):
             self.progress.setRange(0, 1000)
             self.progress.setValue(min(999, int(processed * 1000 / total)))
             self.progress.setFormat('Stage: %p%')
+            self.progress_percent.setText(f'{min(99, int(processed * 100 / total))}% of stage')
         else:
             self.progress.setRange(0, 0)
+            self.progress_percent.setText('Working...')
         self._refresh_activity()
 
     def _refresh_activity(self) -> None:
@@ -418,12 +339,15 @@ class CountryAnalysisWindow(QMainWindow):
             parts.insert(0, 'Cancellation requested; waiting for the current operation to stop')
         message = ' | '.join(parts)
         self.activity.setText(message)
-        self.statusBar().showMessage(message)
+        self.stage_badge.setText('CANCELLING' if self._cancel.is_set() else stage.replace('_', ' ').upper())
+        self.statusBar().showMessage(f'{detail} | Elapsed: {elapsed:.1f} s')
 
     def _operation_failed(self, message: str) -> None:
         self._last_error = message
         self._job_state = 'failed'
         self.results.reset()
+        self.diagnostics_toggle.setChecked(True)
+        self.stage_badge.setText('FAILED')
         self.input_toggle.setChecked(True)
         self.summary.setText('Operation failed. See the error message below.')
         self.activity.setText('Operation failed. No completed result is available for this operation.')
@@ -560,6 +484,7 @@ class CountryAnalysisWindow(QMainWindow):
         if state not in ('COMPLETE', 'PAUSED', 'CANCELLED'):
             raise ValueError(f'Unexpected analysis state: {state}')
         self._last_report = report
+        self.stage_badge.setText(state)
         self._job_state = {'COMPLETE': 'done', 'PAUSED': 'paused', 'CANCELLED': 'cancelled'}[state]
         counts = report.get('status_counts', {})
         breakdown = ' | '.join(
@@ -587,22 +512,29 @@ class CountryAnalysisWindow(QMainWindow):
             if 'case_page' in payload:
                 self.results.apply_page(payload['case_page'])
             elif payload.get('case_error'):
+                self.diagnostics_toggle.setChecked(True)
                 self.results.case_summary.setText('Case list unavailable; select a filter to retry.')
+                self.results.headline.setText('Reports complete - case list unavailable.')
                 self._notify('Case list unavailable', payload['case_error'])
             else:
                 self.results.case_summary.setText('No case detail reports are available for this result.')
             self.activity.setText(f'Analysis complete in {elapsed:.2f} s. Reports are saved locally.')
+            if payload.get('case_error'):
+                self.activity.setText('Country reports are complete, but the case list is unavailable. See Diagnostics or select a filter to retry.')
         else:
             self.results.reset()
             self.activity.setText(f'{state.title()} after {elapsed:.2f} s; only committed records can be resumed.')
         message = ('Complete. Country reports are in the output folder.' if state == 'COMPLETE'
                    else f'{state.title()}. The checkpoint can be resumed from this output folder.')
+        if state == 'COMPLETE' and payload.get('case_error'):
+            message = 'Reports complete; case list unavailable. See Diagnostics or select a filter to retry.'
         self._notify('Country analysis', message)
         self.jobFinished.emit()
 
     def _case_operation_failed(self, message):
         self.results.case_summary.setText('Case operation did not complete. Select a filter to retry.')
         self.activity.setText('Case operation stopped; completed country reports were not changed.')
+        self.diagnostics_toggle.setChecked(True)
         self._notify('Case operation stopped', message)
 
     def _load_cases(self, mode, after_record=0):
@@ -620,6 +552,10 @@ class CountryAnalysisWindow(QMainWindow):
 
     def _apply_case_page(self, page):
         self.results.apply_page(page, self._case_after_record)
+        if self._last_report is not None:
+            pending = self._last_report.get('status_counts', {}).get('UNRESOLVED', 0)
+            self.results.headline.setText('Analysis complete - cases need attention.' if pending
+                                          else 'Analysis complete - no pending cases.')
         self.activity.setText('Case page loaded locally. Original inputs and completed reports are unchanged.')
         self.statusBar().showMessage(self.results.case_summary.text())
 
@@ -650,6 +586,8 @@ class CountryAnalysisWindow(QMainWindow):
 
     def cancel_job(self) -> None:
         self._cancel.set()
+        if self.busy:
+            self.stage_badge.setText('CANCELLING')
         self.cancel_button.setEnabled(False)
         if self.busy:
             self.statusBar().showMessage('Cancellation requested; waiting for the current operation...')
