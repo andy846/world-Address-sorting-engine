@@ -176,6 +176,106 @@ def test_overbroad_anchors_fail_closed(tmp_path):
         assert matcher.match('Lantern Building\n12 Orchid Road') is None
 
 
+@pytest.mark.parametrize('noise_mode', ['both_broad', 'union_overflow'])
+@pytest.mark.parametrize('street', ['12 Orchid Road', '蘭花路12號'])
+def test_exact_paired_names_survive_common_anchors_without_expanding_candidate_cap(tmp_path, noise_mode, street):
+    from world_address_engine.data.hk_regional import alias_anchor, normalize_hk_key
+    from world_address_engine.matching.hk_regional import HKRegionalMatcher
+    path = make_pack(tmp_path, count=81)
+    with closing(sqlite3.connect(path)) as db, db:
+        for index in range(1, 81):
+            address_id = f'synthetic-{index:03}'
+            for kind, stem in (('building', 'Lantern'), ('street', 'Orchid')):
+                if noise_mode == 'union_overflow' and ((kind == 'building') == (index > 40)):
+                    stem = 'Other'
+                name = f'{stem} {index} ' + ('Building' if kind == 'building' else 'Road')
+                key = normalize_hk_key(name)
+                db.execute('UPDATE hk_aliases SET name=?,search_key=?,anchor=? '
+                           'WHERE address_id=? AND kind=? AND language=\'en\'',
+                           (name, key, alias_anchor(key), address_id, kind))
+    repin(path)
+    with HKRegionalMatcher(path) as matcher:
+        result = matcher.match('Lantern Building\n' + street)
+        assert result is not None and result.address_ids == ('synthetic-000',)
+        assert matcher.match('Lantern Building\n99 Orchid Road') is None
+        assert matcher.match('Lantern Building') is None
+
+
+@pytest.mark.parametrize('street', ['12 Orchid Road', '蘭花路12號'])
+def test_exact_official_corporate_building_name_is_address_context(tmp_path, street):
+    from world_address_engine.data.hk_regional import alias_anchor, normalize_hk_key
+    from world_address_engine.matching.country import CountryClassifier
+    from world_address_engine.matching.hk_regional import HKRegionalMatcher
+    path = make_pack(tmp_path)
+    name = 'ORCHID MERCHANTS ASSOCIATION LTD BUILDING'
+    key = normalize_hk_key(name)
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute("UPDATE hk_aliases SET name=?,search_key=?,anchor=? WHERE kind='building' AND language='en'",
+                   (name, key, alias_anchor(key)))
+    repin(path)
+    text = name + '\n' + street
+    with HKRegionalMatcher(path) as matcher:
+        assert matcher.match(text) is not None
+        assert matcher.match('Attn: ' + text) is None
+        assert matcher.match('Mr ' + text) is None
+        assert matcher.match(name + ' Company\n' + street) is None
+        assert matcher.match('Other Ltd Building\n' + street) is None
+        assert matcher.match(name + '\n99 Orchid Road') is None
+    with CountryClassifier(geo(tmp_path), catalogue(), hk_regional_db=path) as classifier:
+        assert classifier.classify(record(text)).reason == 'HK_REGIONAL_ADDRESS_MATCH'
+
+
+def test_rejected_exact_pair_still_allows_independent_street_number_district_fallback(tmp_path):
+    from world_address_engine.matching.hk_regional import HKRegionalMatcher
+    path = make_pack(tmp_path, count=2)
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute("DELETE FROM hk_aliases WHERE kind='building'")
+        db.execute("INSERT INTO hk_aliases SELECT address_id,'building',language,name,search_key,derived,anchor "
+                   "FROM hk_aliases WHERE address_id='synthetic-000' AND kind='street'")
+        db.execute("UPDATE hk_aliases SET name='Other District',search_key='other district',anchor='other' "
+                   "WHERE address_id='synthetic-000' AND kind='district'")
+    repin(path)
+    with HKRegionalMatcher(path) as matcher:
+        match = matcher.match('12 Orchid Road\nCopper District')
+        assert match is not None and match.address_ids == ('synthetic-001',)
+
+
+def test_common_exact_name_negative_has_bounded_sql_work(tmp_path, monkeypatch):
+    from world_address_engine.data.hk_regional import alias_anchor, normalize_hk_key
+    from world_address_engine.matching.hk_regional import HKRegionalMatcher
+    path = make_pack(tmp_path, count=5001)
+    with closing(sqlite3.connect(path)) as db, db:
+        for kind, name in [('building', 'Other Building'), ('street', 'Missing Road')]:
+            key = normalize_hk_key(name)
+            db.execute("UPDATE hk_aliases SET name=?,search_key=?,anchor=? "
+                       "WHERE address_id='synthetic-5000' AND language='en' AND kind=?",
+                       (name, key, alias_anchor(key), kind))
+    repin(path)
+    steps = [0]
+    original_connect = sqlite3.connect
+    def observer():
+        steps[0] += 1000
+        return 0
+    class Counted(sqlite3.Connection):
+        def set_progress_handler(self, callback, n=1000):
+            if callback is None:
+                return super().set_progress_handler(observer, 1000)
+            def combined():
+                observer()
+                return callback()
+            return super().set_progress_handler(combined, n)
+    def connect(*args, **kwargs):
+        kwargs['factory'] = Counted
+        connection = original_connect(*args, **kwargs)
+        sqlite3.Connection.set_progress_handler(connection, observer, 1000)
+        return connection
+    monkeypatch.setattr(sqlite3, 'connect', connect)
+    with HKRegionalMatcher(path) as matcher:
+        steps[0] = 0
+        assert matcher.match('Lantern Building\n12 Missing Road') is None
+        assert steps[0] <= 110_000
+
+
 def test_oversized_numeric_tokens_are_rejected_without_integer_conversion_error(tmp_path):
     from world_address_engine.matching.hk_regional import HKRegionalMatcher
     with HKRegionalMatcher(make_pack(tmp_path)) as matcher:

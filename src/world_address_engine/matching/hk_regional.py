@@ -14,6 +14,9 @@ from world_address_engine.data.hk_regional import normalize_hk_key, verify_hk_pa
 
 _MAX_CANDIDATES = 64
 _MAX_ALIASES = 4096
+_MAX_EXACT_KEYS = 512
+_MAX_ROLE_KEYS = 16
+_PAIR_SQL_STEPS = 100_000
 _HAN = r'\u3400-\u9fff'
 _NUMBER = r'(?:[0-9]+[a-z]?|[零〇一二兩两三四五六七八九十百千]+)'
 _DIGITS = dict(zip('零〇一二兩两三四五六七八九', (0, 0, 1, 2, 2, 2, 3, 4, 5, 6, 7, 8, 9)))
@@ -27,9 +30,12 @@ _COMPANY_ROLE = re.compile(
     r'|有限公司|公司|集團|集团|銀行|银行', re.I)
 _UNIT_PREFIX = re.compile(
     r'\b(?:flat|room|floor|unit|suite|level|block|tower)\s*(?:no\s*)?$|[樓楼室座]\s*$', re.I)
+_BUILDING_END = re.compile(
+    r'\b(?:building|bldg|house|tower|estate|centre|center|plaza)\s*$'
+    r'|(?:大廈|大厦|大樓|大楼|中心|廣場|广场|邨|苑)\s*$')
 
 
-def eligible_hk_lines(text):
+def eligible_hk_lines(text, *, known_building=None):
     """Filter recipient/company roles before general country eligibility.
 
     Keep punctuation between retained address fragments so their context is
@@ -42,7 +48,8 @@ def eligible_hk_lines(text):
         if not line or _RECIPIENT_ROLE.search(line):
             continue
         parts = [part.strip() for part in re.split(r'[,;，；]', line)]
-        kept = [part for part in parts if part and not _COMPANY_ROLE.search(part)]
+        kept = [part for part in parts if part and (not _COMPANY_ROLE.search(part)
+                or known_building is not None and known_building(part))]
         if kept:
             lines.append(', '.join(kept))
     return tuple(lines)
@@ -60,6 +67,28 @@ def _anchors(text):
         values.update(run[i:i + size] for size in (2, 3)
                       for i in range(len(run) - size + 1))
     return sorted(values)
+
+
+def _exact_keys(lines):
+    """Bounded full-alias probes, preserving adjoining Han address components."""
+    if sum(len(line.split()) for line in lines) > 64:
+        return ()
+    keys = set()
+    for line in lines:
+        keys.add(line)
+        words = line.split()
+        for start in range(len(words)):
+            for stop in range(start + 1, min(len(words), start + 12) + 1):
+                keys.add(' '.join(words[start:stop]))
+                if len(keys) > _MAX_EXACT_KEYS:
+                    return ()
+        for run in re.findall('[' + _HAN + ']{2,}', line):
+            for size in range(2, min(24, len(run)) + 1):
+                for start in range(len(run) - size + 1):
+                    keys.add(run[start:start + size])
+                    if len(keys) > _MAX_EXACT_KEYS:
+                        return ()
+    return tuple(sorted(keys))
 
 
 def _alias_pattern(key):
@@ -142,6 +171,69 @@ class HKRegionalMatcher:
             self._db.close()
             self._db = None
 
+    def _official_building(self, text):
+        key = normalize_hk_key(text)
+        if len(key) > 10_000 or not _BUILDING_END.search(key):
+            return False
+        return self._db.execute(
+            'SELECT 1 FROM hk_aliases INDEXED BY hk_alias_lookup '
+            "WHERE search_key=? AND kind IN ('building','estate') LIMIT 1", (key,)).fetchone() is not None
+
+    def eligible_lines(self, text):
+        return eligible_hk_lines(text, known_building=self._official_building)
+
+    def has_official_corporate_heading(self, line):
+        # Only a COMPLETE source building name can restore a company-looking
+        # fragment. A recipient title or a partial company alias cannot do so.
+        return any(_COMPANY_ROLE.search(part) and self._official_building(part)
+                   for part in re.split(r'[,;，；]', line))
+
+    def _paired_candidates(self, lines):
+        ticks = 0
+        exhausted = False
+        def budget():
+            nonlocal ticks, exhausted
+            ticks += 1000
+            exhausted = ticks >= _PAIR_SQL_STEPS
+            return int(exhausted)
+        self._db.set_progress_handler(budget, 1000)
+        try:
+            return self._paired_candidates_query(lines)
+        except sqlite3.OperationalError:
+            if exhausted:
+                return set()
+            raise
+        finally:
+            self._db.set_progress_handler(None, 0)
+
+    def _paired_candidates_query(self, lines):
+        # Common words can each cover thousands of buildings. Complete names
+        # joined on the SAME address remain selective without raising the cap.
+        keys = _exact_keys(lines)
+        groups = {'building': set(), 'estate': set(), 'street': set()}
+        for start in range(0, len(keys), 250):
+            chunk = keys[start:start + 250]
+            rows = self._db.execute(
+                'SELECT DISTINCT search_key,kind FROM hk_aliases INDEXED BY hk_alias_lookup '
+                'WHERE search_key IN (' + ','.join('?' * len(chunk)) + ") "
+                "AND kind IN ('building','estate','street')", chunk)
+            for key, kind in rows:
+                groups[kind].add(key)
+        buildings = sorted(groups['building'] | groups['estate'])
+        streets = sorted(groups['street'])
+        if (not buildings or not streets or len(buildings) > _MAX_ROLE_KEYS or
+                len(streets) > _MAX_ROLE_KEYS):
+            return set()
+        rows = self._db.execute(
+            'SELECT DISTINCT a.address_id FROM hk_aliases a INDEXED BY hk_alias_lookup '
+            'WHERE a.search_key IN (' + ','.join('?' * len(buildings)) + ") "
+            "AND a.kind IN ('building','estate') AND EXISTS ("
+            'SELECT 1 FROM hk_aliases b INDEXED BY hk_alias_lookup '
+            "WHERE b.address_id=a.address_id AND b.kind='street' AND b.search_key IN ("
+            + ','.join('?' * len(streets)) + ')) LIMIT ?',
+            (*buildings, *streets, _MAX_CANDIDATES + 1)).fetchall()
+        return {row[0] for row in rows} if len(rows) <= _MAX_CANDIDATES else set()
+
     def match(self, text):
         if self._db is None:
             raise RuntimeError('Hong Kong regional matcher is closed')
@@ -152,7 +244,17 @@ class HKRegionalMatcher:
         lines = tuple(normalize_hk_key(re.sub(
             r'(\d+[a-zA-Z]?)\s*[-–—~]\s*(\d+[a-zA-Z]?)', r'\1至\2',
             unicodedata.normalize('NFKC', line)))
-            for line in eligible_hk_lines(text))
+            for line in self.eligible_lines(text))
+        candidates = self._paired_candidates(lines)
+        accepted = self._match_candidates(candidates, lines)
+        if accepted is not None:
+            return accepted
+        legacy = self._anchor_candidates(lines)
+        if legacy is None or len(candidates | legacy) > _MAX_CANDIDATES:
+            return None
+        return self._match_candidates(legacy - candidates, lines)
+
+    def _anchor_candidates(self, lines):
         candidates = set()
         for anchor in _anchors(' '.join(lines)):
             # The anchor/address composite index covers DISTINCT and LIMIT.
@@ -164,6 +266,9 @@ class HKRegionalMatcher:
             candidates.update(row[0] for row in rows)
             if len(candidates) > _MAX_CANDIDATES:
                 return None
+        return candidates
+
+    def _match_candidates(self, candidates, lines):
         accepted, evidence = [], set()
         for address_id in sorted(candidates):
             row = self._db.execute(

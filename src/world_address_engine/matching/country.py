@@ -13,7 +13,7 @@ from world_address_engine.matching.retrieve import retrieve_candidates, Occurren
 from world_address_engine.data.geonames_builder import normalize_search_key
 from world_address_engine.models import AddressRecord
 
-COUNTRY_RULES_VERSION = '2026-10-24.country.5'
+COUNTRY_RULES_VERSION = '2026-10-25.country.6'
 RIVAL_RATIO = 0.55
 MAX_ADDRESS_CHARS = 10_000
 CACHE_MAX_ENTRIES = 16_384
@@ -338,9 +338,16 @@ class CountryClassifier:
         return CountryInference(record.record_no, *value)
 
     def _regional_fallback(self, text, original):
-        from world_address_engine.matching.hk_regional import HKRegionalMatcher, eligible_hk_lines
-        lines = list(eligible_hk_lines(text))
+        from world_address_engine.matching.hk_regional import HKRegionalMatcher
+        if len(text) > 10_000:
+            return original
+        if self._hk_regional is None:
+            self._hk_regional = HKRegionalMatcher(self._hk_regional_path)
+        lines = list(self._hk_regional.eligible_lines(text))
         eligible_map = dict(self._eligible_lines(lines))
+        for index, line in enumerate(lines):
+            if self._hk_regional.has_official_corporate_heading(line):
+                eligible_map[index] = line
         # The general estimator conservatively drops a leading name block.
         # A typed building/estate heading is address context for the regional
         # two-component check; company and titled-recipient filters still apply.
@@ -350,8 +357,6 @@ class CountryClassifier:
                     r'|(?:大廈|大厦|大樓|大楼|中心|廣場|广场|邨|苑)\s*$', line):
                 eligible_map[index] = line
         eligible = [line for _index, line in sorted(eligible_map.items())]
-        if self._hk_regional is None:
-            self._hk_regional = HKRegionalMatcher(self._hk_regional_path)
         match = self._hk_regional.match('\n'.join(eligible))
         if match is None:
             return original
