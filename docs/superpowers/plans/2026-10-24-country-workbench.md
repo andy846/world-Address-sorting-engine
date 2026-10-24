@@ -1,6 +1,6 @@
 # Country Workbench Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Deliver the approved compact side-by-side offline analysis workbench without inference/output changes.
 
@@ -29,26 +29,26 @@
 
 **Files:** new gui/presentation.py; modify gui/country_app.py; new integration tests/test_country_workbench.py.
 **Interfaces:** palette_tokens(dark: bool) -> dict[str,str]; apply_workbench_theme(window) -> None. Existing controller/widget attributes remain unchanged. New workbench QSplitter, settings_scroll QScrollArea, diagnostics_toggle QPushButton, diagnostics QWidget.
-- [ ] Write and observe failing light/dark contrast, sidebar/splitter, compact geometry and diagnostics tests.
-- [ ] Implement scoped presentation tokens, layered native surfaces, primary/secondary actions and focus styles.
-- [ ] Reorganize the existing fields and results; add scrollable sidebar and collapsed diagnostics; keep worker/mapping semantics unchanged.
-- [ ] Run GUI/selection-order regression and commit.
+- [x] Write and observe failing light/dark contrast, sidebar/splitter, compact geometry and diagnostics tests.
+- [x] Implement scoped presentation tokens, layered native surfaces, primary/secondary actions and focus styles.
+- [x] Reorganize the existing fields and results; add scrollable sidebar and collapsed diagnostics; keep worker/mapping semantics unchanged.
+- [x] Run GUI/selection-order regression and commit.
 
 ### Task 2: Compact results panel
 
 **Files:** gui/country_results.py; tests/integration/test_country_results.py.
 **Interfaces:** preserve CountryResultsPanel properties/signals/methods. New metric_cards list of QFrame, metrics_grid QGridLayout, case_splitter QSplitter. Semantic properties workbenchRole and tone are used by the shared presentation styles.
-- [ ] Add failing compact metric reflow, split detail/table, read-only and numeric alignment tests.
-- [ ] Refine four metric cards, country/case table density, status labels and full-address detail splitter; keep counts and case data unchanged.
-- [ ] Test baseline panel contracts and QObject collection; independently review and commit.
+- [x] Add failing compact metric reflow, split detail/table, read-only and numeric alignment tests.
+- [x] Refine four metric cards, country/case table density, status labels and full-address detail splitter; keep counts and case data unchanged.
+- [x] Test baseline panel contracts and QObject collection; independently review and commit.
 
 ### Task 3: End-to-end validation and operator build
 
 **Files:** tools/gui_entry_point.py; tests/unit/test_windows_packaging.py; milestone receipt.
-- [ ] Add a failing frozen-bundle workbench layout attestation test, then strengthen real self-test.
-- [ ] Verify synthetic preview/analyze/cancel/resume/pending/export flows and source-order equivalence; inspect synthetic light/dark, compact and large-text screenshots.
-- [ ] Run full real-pack regression, build and smoke-test separate EXE; independent whole-change review and fixes.
-- [ ] Record commit, test counts, measurements, unchanged DB sizes and remaining acceptance gates; push existing draft PR and open new operator build.
+- [x] Add a failing frozen-bundle workbench layout attestation test, then strengthen real self-test.
+- [x] Verify synthetic preview/analyze/cancel/resume/pending/export flows and source-order equivalence; inspect synthetic light/dark, compact and large-text screenshots.
+- [x] Run full real-pack regression, build and smoke-test separate EXE; independent whole-change review and fixes.
+- [x] Record commit, test counts, measurements, unchanged DB sizes and remaining acceptance gates; push existing draft PR and open new operator build.
 
 ## Execution
 
