@@ -221,6 +221,7 @@ def test_bundle_proves_optional_regional_api_and_selected_gui_path(runtime_repor
 
 
 def test_self_test_global_fixtures_satisfy_real_pack_validation(monkeypatch):
+    pytest.importorskip('PySide6')
     from world_address_engine.jobs import country_analysis
     original = country_analysis._pack_metadata
     validated = set()
@@ -252,6 +253,7 @@ def test_bundle_rejects_missing_or_false_regional_evidence(runtime_report, field
 
 
 def test_bundle_regional_smoke_does_not_import_build_only_dependencies(monkeypatch):
+    pytest.importorskip('PySide6')
     real_import = builtins.__import__
 
     def runtime_only(name, *args, **kwargs):
@@ -267,6 +269,7 @@ def test_bundle_regional_smoke_does_not_import_build_only_dependencies(monkeypat
 
 @pytest.mark.parametrize('failure', ['no_match', 'always_match', 'disabled_gui'])
 def test_regional_smoke_fails_when_runtime_behavior_is_broken(monkeypatch, failure):
+    pytest.importorskip('PySide6')
     from world_address_engine.matching.hk_regional import HKRegionalMatcher, HKRegionalMatch
     from world_address_engine.gui.country_app import CountryAnalysisWindow
     if failure == 'no_match':

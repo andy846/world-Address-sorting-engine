@@ -97,3 +97,18 @@ Repeated-million disabled-pack receipt:
   remain blocked by the explicit source-policy decision.
 - Detailed sizes, review evidence and limits:
   docs/HK_REGIONAL_VALIDATION_2026-10-24.md.
+
+2026-10-25 remote validation follow-up:
+
+- At 9a37b80, Windows regression run 40097228050 and the Windows bundle job
+  in release-validation run 40097228009 passed, including actual EXE self-test.
+- The Linux real-pack job installed and verified both real databases, then
+  reported 1,298 passed, 58 skipped, 2 xfailed and five failures. All five were
+  new GUI-only self-tests importing PySide6 in the backend-only environment.
+- Reproduced all five failures locally with Qt imports blocked. Added the
+  same optional-dependency guard used by existing GUI self-tests; the five
+  cases now skip without Qt. With Qt installed, the entire packaging test
+  module still executes: 83 passed, 1 optional real-build test skipped in
+  24.12s. Production acceptance assertions and dependency sets are unchanged.
+- Fresh remote validation of this test-only correction is pending. Runtime
+  code, candidate artifact bytes and the measured million workload are unchanged.
