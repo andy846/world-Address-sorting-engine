@@ -87,7 +87,14 @@ def test_selected_path_failure_on_worker_is_clear_without_state(window, tmp_path
     assert window.hk_enabled.isEnabled()
 
 
-@pytest.mark.parametrize('metadata,expected', [(None, 'disabled'), ({'version': 'official-test-v1'}, 'official-test-v1')])
+@pytest.mark.parametrize('metadata,expected', [
+    (None, 'disabled'), ({'version': 'official-test-v1'}, 'official-test-v1'),
+    ({'version': 'partial-v1', 'source_validation': {
+        'policy': 'quarantine-invalid', 'coverage': 'partial', 'feature_count': 5,
+        'valid_feature_count': 2, 'quarantined_feature_count': 3,
+        'quarantine_file': 'quarantine.jsonl', 'quarantine_sha256': 'a' * 64}},
+     'partial-v1 (partial source; 3 excluded)'),
+])
 def test_resume_uses_pins_and_displays_report_version(window, tmp_path, app, monkeypatch, metadata, expected):
     configure(window, tmp_path)
     window.hk_enabled.setChecked(True)
@@ -107,6 +114,63 @@ def test_resume_uses_pins_and_displays_report_version(window, tmp_path, app, mon
     assert 'hk_regional_db' not in calls[0]
     assert expected in window.source_versions.text()
     assert 'different-current-choice' not in window.source_versions.text()
+
+
+@pytest.mark.parametrize('policy,entries,suffix', [
+    ('strict', [], ''), ('quarantine-invalid', [], ''),
+    ('quarantine-invalid', None, ' (partial source; 2 excluded)'),
+])
+@pytest.mark.parametrize('state', ['COMPLETE', 'PAUSED', 'CANCELLED'])
+def test_real_source_validation_metadata_labels_completed_and_resumed_runs(
+        window, app, tmp_path, monkeypatch, policy, entries, suffix, state):
+    from tests.unit.test_retrieve import geo
+    from tests.unit.test_hk_regional_pack import source_validation_pack
+    from world_address_engine.jobs import country_analysis
+
+    configure(window, tmp_path)
+    (tmp_path / 'synthetic.csv').write_text(
+        'NAME_ADDRESS_LINE1\nJapan\nChina\nHong Kong\n', encoding='utf8')
+    db, metadata = source_validation_pack(tmp_path / 'hk', policy=policy, entries=entries)
+    window.geo_db.setText(str(geo(tmp_path)))
+    window.hk_regional_db.setText(str(db))
+    window.hk_enabled.setChecked(True)
+    original_analyze = country_analysis.analyze_job
+    original_resume = country_analysis.resume_analysis
+
+    def analyze(*args, **kwargs):
+        kwargs['batch_size'] = 1
+        if state == 'PAUSED':
+            kwargs['max_batches'] = 1
+        elif state == 'CANCELLED':
+            cancelled = threading.Event()
+            emit = kwargs['on_progress']
+
+            def committed(count):
+                emit(count)
+                cancelled.set()
+
+            kwargs['on_progress'] = committed
+            kwargs['cancel_requested'] = cancelled.is_set
+        return original_analyze(*args, **kwargs)
+
+    monkeypatch.setattr(country_analysis, 'analyze_job', analyze)
+    window.start_job()
+    wait(app, lambda: not window.busy)
+    assert window.job_state == {'COMPLETE': 'done', 'PAUSED': 'paused', 'CANCELLED': 'cancelled'}[state], window.log.toPlainText()
+    expected = 'Hong Kong: 2026-10-23-r1' + suffix
+    assert window.source_versions.text().endswith(expected)
+    assert window._last_report['run_metadata']['hk_regional']['source_validation'] == metadata['source_validation']
+    if state != 'COMPLETE':
+        saved = json.loads((tmp_path / 'export' / '.country-state' / 'config.json').read_text(encoding='utf8'))
+        assert saved['hk_regional'] == window._last_report['run_metadata']['hk_regional']
+        # A different current selection must not replace the real checkpoint label.
+        window.hk_enabled.setChecked(False)
+        window.hk_regional_db.setText('different-current-choice.db')
+        monkeypatch.setattr(country_analysis, 'resume_analysis', original_resume)
+        window.resume_job()
+        wait(app, lambda: not window.busy)
+        assert window.job_state == 'done', window.log.toPlainText()
+        assert window.source_versions.text().endswith(expected)
 
 
 def test_hk_hashing_stage_and_reason_are_human_readable(window):

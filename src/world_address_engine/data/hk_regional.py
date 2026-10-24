@@ -46,6 +46,70 @@ def _standalone_database(path):
         raise ValueError('Hong Kong pack must be a standalone SQLite database without WAL/journal files')
 
 
+def _verify_source_validation(metadata, db_path):
+    """Validate optional source coverage and stream the required quarantine log."""
+    if 'source_validation' not in metadata:
+        return None
+    validation = metadata['source_validation']
+    required = {'policy', 'coverage', 'feature_count', 'valid_feature_count',
+                'quarantined_feature_count', 'quarantine_file', 'quarantine_sha256'}
+    if not isinstance(validation, dict) or set(validation) != required:
+        raise ValueError('Hong Kong pack source validation is incomplete')
+    if (validation['policy'] not in ('strict', 'quarantine-invalid') or
+            validation['coverage'] not in ('complete', 'partial')):
+        raise ValueError('invalid Hong Kong pack source validation policy/coverage')
+    for key in ('feature_count', 'valid_feature_count', 'quarantined_feature_count'):
+        if type(validation[key]) is not int or validation[key] < 0:
+            raise ValueError('invalid Hong Kong pack source validation count')
+    excluded = validation['quarantined_feature_count']
+    if (validation['valid_feature_count'] + excluded != validation['feature_count'] or
+            metadata['record_count'] > validation['valid_feature_count'] or
+            (validation['coverage'] == 'partial') != (excluded > 0)):
+        raise ValueError('Hong Kong pack source validation counts/coverage mismatch')
+    if validation['policy'] == 'strict':
+        if (excluded or validation['quarantine_file'] is not None or
+                validation['quarantine_sha256'] is not None):
+            raise ValueError('strict Hong Kong pack cannot quarantine source features')
+        return None
+    checksum = validation['quarantine_sha256']
+    if (validation['quarantine_file'] != 'quarantine.jsonl' or
+            not isinstance(checksum, str) or not re.fullmatch('[0-9a-f]{64}', checksum)):
+        raise ValueError('invalid Hong Kong pack quarantine file/checksum')
+    path = db_path.with_name('quarantine.jsonl')
+    digest = hashlib.sha256()
+    count = 0
+    locators = set()
+    def unique_fields(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('duplicate Hong Kong pack quarantine object key')
+            result[key] = value
+        return result
+    with path.open('rb') as stream:
+        for line in stream:
+            digest.update(line)
+            entry = json.loads(line.decode('utf8'), object_pairs_hook=unique_fields)
+            if (not isinstance(entry, dict) or
+                    set(entry) != {'source_member', 'source_index', 'reason'} or
+                    not isinstance(entry.get('source_member'), str) or
+                    type(entry.get('source_index')) is not int or entry['source_index'] < 1 or
+                    entry.get('reason') not in ('feature_schema', 'invalid_hk_address')):
+                raise ValueError('invalid Hong Kong pack quarantine entry')
+            locator = entry['source_member'], entry['source_index']
+            if locator in locators:
+                raise ValueError('duplicate Hong Kong pack quarantine feature locator')
+            locators.add(locator)
+            count += 1
+            if count > excluded:
+                raise ValueError('Hong Kong pack quarantine count mismatch')
+    if count != excluded:
+        raise ValueError('Hong Kong pack quarantine count mismatch')
+    if digest.hexdigest() != checksum:
+        raise ValueError('Hong Kong pack quarantine checksum mismatch')
+    return path
+
+
 def verify_hk_pack(db_path: Path, *, full: bool = True) -> dict:
     db_path = Path(db_path).resolve()
     manifest_path = db_path.with_name('manifest.json')
@@ -79,6 +143,7 @@ def verify_hk_pack(db_path: Path, *, full: bool = True) -> dict:
             raise ValueError('invalid Hong Kong pack language counts')
         if any(not metadata[key] for key in ('source_url','source_date','conversion_version','attribution','license')):
             raise ValueError('missing Hong Kong pack provenance')
+        quarantine_path = _verify_source_validation(metadata, db_path)
         if _hash(db_path) != metadata['db_sha256']:
             raise ValueError('Hong Kong pack checksum mismatch')
         _standalone_database(db_path)
@@ -141,7 +206,9 @@ def verify_hk_pack(db_path: Path, *, full: bool = True) -> dict:
                 raise ValueError('Hong Kong pack integrity check failed')
         # Verify metadata and bytes again after consuming them.
         if (json.loads(manifest_path.read_text(encoding='utf8')) != metadata or
-                _hash(db_path) != metadata['db_sha256']):
+                _hash(db_path) != metadata['db_sha256'] or
+                (quarantine_path is not None and
+                 _hash(quarantine_path) != metadata['source_validation']['quarantine_sha256'])):
             raise ValueError('Hong Kong pack changed during verification')
         _standalone_database(db_path)
         return metadata
@@ -158,9 +225,12 @@ def hk_pack_metadata(db_path: Path) -> dict:
             raise ValueError('Hong Kong pack manifest changed during verification')
     except OSError as exc:
         raise ValueError('invalid or unreadable Hong Kong regional pack manifest') from exc
-    return {'path': str(path), 'profile': metadata['profile'], 'version': metadata['pack_version'],
-            'schema_version': metadata['schema_version'], 'db_sha256': metadata['db_sha256'],
-            'manifest_sha256': before}
+    pinned = {'path': str(path), 'profile': metadata['profile'], 'version': metadata['pack_version'],
+              'schema_version': metadata['schema_version'], 'db_sha256': metadata['db_sha256'],
+              'manifest_sha256': before}
+    if 'source_validation' in metadata:
+        pinned['source_validation'] = metadata['source_validation']
+    return pinned
 
 
 def install_hk_pack(staging_dir: Path, active_root: Path) -> Path:
@@ -173,7 +243,10 @@ def install_hk_pack(staging_dir: Path, active_root: Path) -> Path:
         raise FileExistsError('Hong Kong pack version already installed; do not overwrite')
     temporary = Path(tempfile.mkdtemp(prefix='.hk-pack-', dir=active_root))
     try:
-        for name in ('pack.db','manifest.json','ATTRIBUTION.txt','audit.json'):
+        names = ['pack.db', 'manifest.json', 'ATTRIBUTION.txt', 'audit.json']
+        if metadata.get('source_validation', {}).get('quarantine_file') == 'quarantine.jsonl':
+            names.append('quarantine.jsonl')
+        for name in names:
             if (staging_dir / name).is_file():
                 shutil.copy2(staging_dir / name, temporary / name)
         copied = verify_hk_pack(temporary / 'pack.db')

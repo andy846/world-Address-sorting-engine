@@ -577,6 +577,10 @@ class CountryAnalysisWindow(QMainWindow):
         regional_version = ('disabled' if regional is None and 'hk_regional' in meta
                             else regional.get('version', 'unavailable')
                             if isinstance(regional, dict) else 'unavailable')
+        source_validation = regional.get('source_validation') if isinstance(regional, dict) else None
+        if isinstance(source_validation, dict) and source_validation.get('coverage') == 'partial':
+            excluded = source_validation['quarantined_feature_count']
+            regional_version = f'{regional_version} (partial source; {excluded} excluded)'
         self.source_versions.setText(
             f"Catalogue: {meta.get('catalogue_version', '')} | "
             f"GeoNames: {meta.get('geo_pack_version', meta.get('geo_pack_versions', ''))} | "

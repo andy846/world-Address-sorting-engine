@@ -147,3 +147,240 @@ def test_installation_rejects_a_different_verified_snapshot_during_copy(tmp_path
     with pytest.raises(ValueError, match='changed|snapshot'):
         api().install_hk_pack(db.parent, active)
     assert not list(active.glob('hk-bilingual-*'))
+
+
+def source_validation_pack(path, *, policy='quarantine-invalid', entries=None):
+    """One installed address from two valid source features, plus exclusions."""
+    db, metadata = fixture_pack(path)
+    if entries is None:
+        entries = [{'source_member': 'synthetic.geojson', 'source_index': 3,
+                    'reason': 'feature_schema'},
+                   {'source_member': 'synthetic.geojson', 'source_index': 4,
+                    'reason': 'invalid_hk_address'}]
+    contents = ''.join(json.dumps(entry) + '\n' for entry in entries).encode('utf8')
+    validation = {'policy': policy, 'coverage': 'partial' if entries else 'complete',
+                  'feature_count': 2 + len(entries), 'valid_feature_count': 2,
+                  'quarantined_feature_count': len(entries),
+                  'quarantine_file': None, 'quarantine_sha256': None}
+    if policy == 'quarantine-invalid':
+        (db.parent / 'quarantine.jsonl').write_bytes(contents)
+        validation.update(quarantine_file='quarantine.jsonl',
+                          quarantine_sha256=hashlib.sha256(contents).hexdigest())
+    metadata['source_validation'] = validation
+    rehash_manifest(db, metadata)
+    return db, metadata
+
+
+@pytest.mark.parametrize('policy,entries', [('strict', []), ('quarantine-invalid', []),
+                                          ('quarantine-invalid', None)])
+def test_source_validation_is_verified_and_pinned(tmp_path, policy, entries):
+    db, metadata = source_validation_pack(tmp_path / 'stage', policy=policy, entries=entries)
+    assert api().verify_hk_pack(db) == metadata
+    assert api().hk_pack_metadata(db)['source_validation'] == metadata['source_validation']
+
+
+def test_legacy_metadata_does_not_gain_source_validation(tmp_path):
+    db, _ = fixture_pack(tmp_path / 'legacy')
+    assert 'source_validation' not in api().hk_pack_metadata(db)
+
+
+@pytest.mark.parametrize('validation', [None, [], 'partial', 1, True])
+def test_source_validation_requires_an_object(tmp_path, validation):
+    db, metadata = fixture_pack(tmp_path / 'stage')
+    metadata['source_validation'] = validation
+    rehash_manifest(db, metadata)
+    with pytest.raises(ValueError):
+        api().verify_hk_pack(db, full=False)
+
+
+@pytest.mark.parametrize('missing', ['policy', 'coverage', 'feature_count', 'valid_feature_count',
+                                    'quarantined_feature_count', 'quarantine_file', 'quarantine_sha256'])
+def test_source_validation_requires_every_field(tmp_path, missing):
+    db, metadata = source_validation_pack(tmp_path / 'stage')
+    del metadata['source_validation'][missing]
+    rehash_manifest(db, metadata)
+    with pytest.raises(ValueError):
+        api().verify_hk_pack(db)
+
+
+@pytest.mark.parametrize('key,value', [
+    ('policy', 'ignore-invalid'), ('policy', None), ('policy', []),
+    ('coverage', 'unknown'), ('coverage', None), ('coverage', {}),
+    ('coverage', 'complete'), ('feature_count', 3),
+    ('quarantine_file', '../quarantine.jsonl'), ('quarantine_file', './quarantine.jsonl'),
+    ('quarantine_file', 'other.jsonl'), ('quarantine_file', '/quarantine.jsonl'),
+    ('quarantine_file', 'C:\\quarantine.jsonl'), ('quarantine_file', None),
+    ('quarantine_sha256', None), ('quarantine_sha256', 'A' * 64),
+    ('quarantine_sha256', 'g' * 64), ('quarantine_sha256', 'a' * 63),
+    ('quarantine_sha256', 123),
+])
+def test_source_validation_rejects_bad_metadata(tmp_path, key, value):
+    db, metadata = source_validation_pack(tmp_path / 'stage')
+    metadata['source_validation'][key] = value
+    rehash_manifest(db, metadata)
+    with pytest.raises(ValueError):
+        api().hk_pack_metadata(db)
+
+
+@pytest.mark.parametrize('key', ['feature_count', 'valid_feature_count', 'quarantined_feature_count'])
+@pytest.mark.parametrize('value', [True, 1.0, '1', -1, None])
+def test_source_validation_counts_are_nonnegative_integers(tmp_path, key, value):
+    db, metadata = source_validation_pack(tmp_path / 'stage')
+    metadata['source_validation'][key] = value
+    rehash_manifest(db, metadata)
+    with pytest.raises(ValueError):
+        api().verify_hk_pack(db)
+
+
+@pytest.mark.parametrize('mutation', ['partial_without_exclusions', 'strict_exclusions',
+                                      'strict_file', 'strict_hash', 'record_count_exceeds_valid'])
+def test_source_validation_enforces_policy_coverage_and_source_totals(tmp_path, mutation):
+    db, metadata = source_validation_pack(tmp_path / 'stage', policy='strict', entries=[])
+    validation = metadata['source_validation']
+    if mutation == 'partial_without_exclusions':
+        validation['coverage'] = 'partial'
+    elif mutation == 'strict_exclusions':
+        validation.update(coverage='partial', feature_count=3, quarantined_feature_count=1)
+    elif mutation == 'strict_file':
+        validation['quarantine_file'] = 'quarantine.jsonl'
+    elif mutation == 'strict_hash':
+        validation['quarantine_sha256'] = 'a' * 64
+    else:
+        validation.update(feature_count=0, valid_feature_count=0)
+    rehash_manifest(db, metadata)
+    with pytest.raises(ValueError):
+        api().verify_hk_pack(db)
+
+
+@pytest.mark.parametrize('mutation', ['missing', 'checksum', 'fewer_lines', 'more_lines',
+                                      'invalid_json', 'blank_line', 'invalid_utf8'])
+def test_quarantine_file_must_match_hash_count_and_jsonl(tmp_path, mutation):
+    db, metadata = source_validation_pack(tmp_path / 'stage')
+    sidecar = db.parent / 'quarantine.jsonl'
+    if mutation == 'missing':
+        sidecar.unlink()
+    elif mutation == 'checksum':
+        sidecar.write_bytes(sidecar.read_bytes() + b' ')
+    else:
+        contents = sidecar.read_bytes()
+        contents = {'fewer_lines': contents.splitlines(keepends=True)[0],
+                    'more_lines': contents + contents,
+                    'invalid_json': b'{broken\n', 'blank_line': contents + b'\n',
+                    'invalid_utf8': b'\xff\n'}[mutation]
+        sidecar.write_bytes(contents)
+        metadata['source_validation']['quarantine_sha256'] = hashlib.sha256(contents).hexdigest()
+        rehash_manifest(db, metadata)
+    with pytest.raises(ValueError):
+        api().verify_hk_pack(db, full=False)
+
+
+@pytest.mark.parametrize('entry', [None, [], {},
+    {'source_member': 1, 'source_index': 1, 'reason': 'feature_schema'},
+    {'source_member': 'fixture', 'source_index': True, 'reason': 'feature_schema'},
+    {'source_member': 'fixture', 'source_index': 0, 'reason': 'feature_schema'},
+    {'source_member': 'fixture', 'source_index': -1, 'reason': 'feature_schema'},
+    {'source_member': 'fixture', 'source_index': 1.0, 'reason': 'feature_schema'},
+    {'source_member': 'fixture', 'source_index': '1', 'reason': 'feature_schema'},
+    {'source_member': 'fixture', 'source_index': 1, 'reason': 'other'},
+    {'source_member': 'fixture', 'source_index': 1, 'reason': []},
+    {'source_member': 'fixture', 'source_index': 1},
+    {'source_index': 1, 'reason': 'feature_schema'},
+    {'source_member': 'fixture', 'reason': 'feature_schema'},
+    {'source_member': 'fixture', 'source_index': 1, 'reason': 'feature_schema', 'extra': 'unexpected'},
+])
+def test_quarantine_entries_require_source_location_and_allowed_reason(tmp_path, entry):
+    db, _ = source_validation_pack(tmp_path / 'stage', entries=[entry])
+    with pytest.raises(ValueError):
+        api().verify_hk_pack(db)
+
+
+def test_quarantine_verification_streams_instead_of_loading_the_whole_file(tmp_path, monkeypatch):
+    db, metadata = source_validation_pack(tmp_path / 'stage')
+    read_bytes, read_text = Path.read_bytes, Path.read_text
+
+    def bounded_read(original):
+        def read(path, *args, **kwargs):
+            assert path.name != 'quarantine.jsonl', 'quarantine must be streamed'
+            return original(path, *args, **kwargs)
+        return read
+
+    monkeypatch.setattr(Path, 'read_bytes', bounded_read(read_bytes))
+    monkeypatch.setattr(Path, 'read_text', bounded_read(read_text))
+    assert api().hk_pack_metadata(db)['source_validation'] == metadata['source_validation']
+
+
+def test_quarantine_file_is_rechecked_after_database_verification(tmp_path, monkeypatch):
+    db, _ = source_validation_pack(tmp_path / 'stage')
+    original_hash = api()._hash
+    db_hashes = 0
+
+    def mutate_after_consumption(path):
+        nonlocal db_hashes
+        if Path(path) == db:
+            db_hashes += 1
+            if db_hashes == 2:
+                (db.parent / 'quarantine.jsonl').write_bytes(b'changed during verification\n')
+        return original_hash(path)
+
+    monkeypatch.setattr(api(), '_hash', mutate_after_consumption)
+    with pytest.raises(ValueError, match='changed|checksum'):
+        api().verify_hk_pack(db)
+
+
+@pytest.mark.parametrize('policy,entries', [('strict', []), ('quarantine-invalid', []),
+                                          ('quarantine-invalid', None), ('legacy', [])])
+def test_install_copies_quarantine_only_when_required_and_verifies_it(tmp_path, policy, entries):
+    if policy == 'legacy':
+        db, metadata = fixture_pack(tmp_path / 'stage')
+    else:
+        db, metadata = source_validation_pack(tmp_path / 'stage', policy=policy, entries=entries)
+    required = policy == 'quarantine-invalid'
+    sidecar = db.parent / 'quarantine.jsonl'
+    if not required:
+        sidecar.write_text('unreferenced file is not part of the pack', encoding='utf8')
+    installed = api().install_hk_pack(db.parent, tmp_path / 'packs')
+    copied = installed.parent / 'quarantine.jsonl'
+    assert copied.exists() == required
+    if required:
+        assert copied.read_bytes() == sidecar.read_bytes()
+    assert api().verify_hk_pack(installed) == metadata
+
+
+def test_install_refuses_corrupted_quarantine_copy_and_cleans_temporary_pack(tmp_path, monkeypatch):
+    db, _ = source_validation_pack(tmp_path / 'stage')
+    original_copy = api().shutil.copy2
+
+    def corrupt_copy(source, target):
+        result = original_copy(source, target)
+        if Path(source).name == 'quarantine.jsonl':
+            Path(target).write_bytes(b'corrupt\n')
+        return result
+
+    monkeypatch.setattr(api().shutil, 'copy2', corrupt_copy)
+    active = tmp_path / 'packs'
+    with pytest.raises(ValueError):
+        api().install_hk_pack(db.parent, active)
+    assert not list(active.iterdir())
+
+
+@pytest.mark.parametrize('mutation', ['extra_metadata', 'duplicate_key', 'duplicate_locator'])
+def test_partial_receipt_has_exact_contract_and_distinct_feature_locators(tmp_path, mutation):
+    db, metadata = source_validation_pack(tmp_path / 'stage')
+    validation = metadata['source_validation']
+    receipt = db.with_name('quarantine.jsonl')
+    if mutation == 'extra_metadata':
+        validation['unexpected_raw'] = 'not part of this contract'
+    elif mutation == 'duplicate_key':
+        tail = receipt.read_bytes().splitlines()[1] + b'\n'
+        receipt.write_bytes(b'{"source_member":"hidden value","source_member":"synthetic.geojson",'
+                            b'"source_index":3,"reason":"feature_schema"}\n' + tail)
+        validation['quarantine_sha256'] = hashlib.sha256(receipt.read_bytes()).hexdigest()
+    else:
+        first = receipt.read_bytes().splitlines()[0] + b'\n'
+        receipt.write_bytes(first + first)
+        validation['quarantined_feature_count'] = 2
+        validation['feature_count'] = validation['valid_feature_count'] + 2
+        validation['quarantine_sha256'] = hashlib.sha256(receipt.read_bytes()).hexdigest()
+    db.with_name('manifest.json').write_text(json.dumps(metadata), encoding='utf8')
+    with pytest.raises(ValueError):
+        api().verify_hk_pack(db)
