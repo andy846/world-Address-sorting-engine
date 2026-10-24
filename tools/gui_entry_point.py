@@ -91,6 +91,7 @@ def report_errors(report, *, expected_version: str, require_frozen: bool = False
         'same_address_positive': True, 'number_mismatch_negative': True,
         'gui_complete': True, 'destination_counts': {'HK': 1},
         'unresolved': 1, 'version_displayed': True,
+        'partial_source_displayed': True, 'quarantine_identity_pinned': True,
     }
     regional = report.get('hk_regional')
     if (not isinstance(regional, dict) or regional.keys() != expected_regional.keys()
@@ -152,13 +153,22 @@ def _regional_self_test(app, window, work):
         CREATE TABLE hk_pack_metadata(profile TEXT,schema_version INTEGER,normalization_version INTEGER);
         INSERT INTO hk_pack_metadata VALUES('HK_BILINGUAL_REGIONAL',1,1);
         INSERT INTO hk_buildings VALUES('SYNTHETIC-CSU');
-        INSERT INTO hk_addresses VALUES('synthetic-address','SYNTHETIC-CSU','synthetic.geojson',0,
+        INSERT INTO hk_addresses VALUES('synthetic-address','SYNTHETIC-CSU','synthetic.geojson',1,
           NULL,114.1,22.3,NULL,NULL,NULL,NULL,'10','20',0);
         ''')
         for kind, name in (('building', 'Lantern Building'), ('street', 'Orchid Road')):
             key = normalize_hk_key(name)
             db.execute('INSERT INTO hk_aliases VALUES(?,?,?,?,?,?,?)',
                        ('synthetic-address', kind, 'en', name, key, 0, alias_anchor(key)))
+    quarantine = (json.dumps({'source_member': 'synthetic.geojson', 'source_index': 2,
+                              'reason': 'feature_schema'}) + '\n').encode('utf-8')
+    (root / 'quarantine.jsonl').write_bytes(quarantine)
+    source_validation = {
+        'policy': 'quarantine-invalid', 'coverage': 'partial',
+        'feature_count': 2, 'valid_feature_count': 1, 'quarantined_feature_count': 1,
+        'quarantine_file': 'quarantine.jsonl',
+        'quarantine_sha256': hashlib.sha256(quarantine).hexdigest(),
+    }
     metadata = {
         'profile': 'HK_BILINGUAL_REGIONAL', 'schema_version': 1, 'normalization_version': 1,
         'pack_id': 'hk-bilingual-als', 'pack_version': 'synthetic-smoke-1',
@@ -169,6 +179,7 @@ def _regional_self_test(app, window, work):
         'alias_count_by_language': {'en': 2}, 'conversion_version': 'synthetic-no-conversion',
         'attribution': 'Synthetic fixture only; not official address data',
         'license': 'Synthetic self-test fixture',
+        'source_validation': source_validation,
     }
     (root / 'manifest.json').write_text(json.dumps(metadata), encoding='utf-8')
     positive, negative = 'Lantern Building\n12 Orchid Road', 'Lantern Building\n99 Orchid Road'
@@ -216,6 +227,9 @@ def _regional_self_test(app, window, work):
         'destination_counts': result.get('destination_counts'),
         'unresolved': result.get('status_counts', {}).get('UNRESOLVED'),
         'version_displayed': 'Hong Kong: synthetic-smoke-1' in window.source_versions.text(),
+        'partial_source_displayed': ('Hong Kong: synthetic-smoke-1 (partial source; 1 excluded)'
+                                     in window.source_versions.text()),
+        'quarantine_identity_pinned': regional.get('source_validation') == source_validation,
     }
 
 
