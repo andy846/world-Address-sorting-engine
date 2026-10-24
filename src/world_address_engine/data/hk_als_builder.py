@@ -1,6 +1,6 @@
 """Audited, offline ALS GeoJSON to SQLite builder (build dependencies are lazy)."""
 from collections import Counter
-from contextlib import closing
+from contextlib import closing, nullcontext
 from copy import deepcopy
 from datetime import date
 import hashlib
@@ -234,7 +234,8 @@ def _insert(db, feature, member, index, convert, normalize, anchor):
     return True
 
 
-def build_als_pack(archive, schema, output_dir, *, source_date, pack_version, on_progress=None):
+def build_als_pack(archive, schema, output_dir, *, source_date, pack_version, on_progress=None,
+                   quarantine_invalid=False):
     """Build a strictly validated pack; failures leave only aggregate audit.json.
 
     Returns the published manifest. Progress receives count-only dictionaries.
@@ -246,6 +247,8 @@ def build_als_pack(archive, schema, output_dir, *, source_date, pack_version, on
     from world_address_engine.data.hk_regional import normalize_hk_key, alias_anchor
 
     archive, schema, output = Path(archive).resolve(), Path(schema).resolve(), Path(output_dir).resolve()
+    if type(quarantine_invalid) is not bool:
+        raise ValueError('quarantine_invalid must be an explicit boolean')
     if output.exists() and (not output.is_dir() or any(output.iterdir())):
         raise FileExistsError("Existing nonempty output directory; choose a new destination")
     if output in (archive, schema) or output in archive.parents or output in schema.parents:
@@ -259,7 +262,8 @@ def build_als_pack(archive, schema, output_dir, *, source_date, pack_version, on
     staging = work / "pack.db.building"
     audit = {"status": "building", "feature_count": 0, "valid_count": 0, "invalid_count": 0,
              "duplicate_count": 0, "three_d_item_count": 0, "members": [], "errors": [],
-             "district_counts": {}, "blank_optional_counts": {}, "bilingual_pair_count": 0}
+             "district_counts": {}, "blank_optional_counts": {}, "bilingual_pair_count": 0,
+             "validation_policy": 'quarantine-invalid' if quarantine_invalid else 'strict'}
     started = time.monotonic()
     def notify(stage):
         if on_progress:
@@ -291,7 +295,9 @@ def build_als_pack(archive, schema, output_dir, *, source_date, pack_version, on
         convert = OpenCC("t2s").convert
         districts, blanks = Counter(), Counter()
         schema_errors, missing_required = Counter(), Counter()
-        with archive.open("rb") as source_stream, closing(sqlite3.connect(staging)) as db:
+        receipt = work / 'quarantine.jsonl'
+        with (archive.open("rb") as source_stream, closing(sqlite3.connect(staging)) as db,
+              (receipt.open('w', encoding='utf-8', newline='\n') if quarantine_invalid else nullcontext()) as rejected):
             # Hash the very handle ZIP will consume, not just its pathname.
             if hashlib.file_digest(source_stream, "sha256").hexdigest() != source_hash:
                 raise ValueError("Source changed before read")
@@ -344,6 +350,9 @@ def build_als_pack(archive, schema, output_dir, *, source_date, pack_version, on
                         if reason:
                             audit["invalid_count"] += 1
                             member_audit["invalid_count"] += 1
+                            if rejected is not None:
+                                rejected.write(json.dumps({'source_member': info.filename,
+                                    'source_index': index, 'reason': reason}, ensure_ascii=True) + '\n')
                             if len(audit["errors"]) < 20:
                                 audit["errors"].append({"member": info.filename, "source_index": index, "reason": reason})
                             return
@@ -381,7 +390,7 @@ def build_als_pack(archive, schema, output_dir, *, source_date, pack_version, on
             if (hashlib.file_digest(source_stream, "sha256").hexdigest() != source_hash or
                     _sha(archive) != source_hash or _sha(schema) != schema_hash):
                 raise ValueError("Source or schema changed during build")
-            if audit["invalid_count"]:
+            if audit["invalid_count"] and not quarantine_invalid:
                 raise ValueError("Invalid features block final database; see audit.json")
             record_count = db.execute("SELECT COUNT(*) FROM hk_addresses").fetchone()[0]
             if record_count == 0:
@@ -399,6 +408,15 @@ def build_als_pack(archive, schema, output_dir, *, source_date, pack_version, on
                         "conversion_version": CONVERSION_VERSION, "attribution": ATTRIBUTION,
                         "license": {"url": LICENSE_URL, "text": "Reuse subject to DATA.GOV.HK terms; retain source attribution and original terms. Not relicensed under the software license."}}
             db.commit()
+        manifest['source_validation'] = {
+            'policy': audit['validation_policy'],
+            'coverage': 'partial' if audit['invalid_count'] else 'complete',
+            'feature_count': audit['feature_count'], 'valid_feature_count': audit['valid_count'],
+            'quarantined_feature_count': audit['invalid_count'],
+            'quarantine_file': 'quarantine.jsonl' if quarantine_invalid else None,
+            'quarantine_sha256': _sha(receipt) if quarantine_invalid else None,
+        }
+        audit['source_validation'] = manifest['source_validation']
         manifest["db_sha256"] = _sha(staging)
         def check_sources():
             if _sha(archive) != source_hash or _sha(schema) != schema_hash:
@@ -407,7 +425,9 @@ def build_als_pack(archive, schema, output_dir, *, source_date, pack_version, on
         audit.update(status="publishing", record_count=record_count,
                      elapsed_seconds=round(time.monotonic() - started, 3))
         _json_write(work / "audit.json", audit)
-        (work / "ATTRIBUTION.txt").write_text(ATTRIBUTION + "\n" + SOURCE_URL + "\n" + LICENSE_URL + "\n" + manifest["license"]["text"] + "\n", encoding="utf-8")
+        coverage_note = (f"Source snapshot coverage: {manifest['source_validation']['coverage']}; "
+                         f"{audit['invalid_count']} excluded features. This is not exhaustive HK coverage.")
+        (work / "ATTRIBUTION.txt").write_text(ATTRIBUTION + "\n" + SOURCE_URL + "\n" + LICENSE_URL + "\n" + manifest["license"]["text"] + "\n" + coverage_note + "\n", encoding="utf-8")
         staging.rename(work / "pack.db")
         _json_write(work / "manifest.json", manifest)
         check_sources()
