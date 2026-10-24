@@ -9,7 +9,7 @@ from functools import partial
 from pathlib import Path
 from time import monotonic
 
-from PySide6.QtCore import QEvent, Qt, Signal, Slot, QUrl, QTimer
+from PySide6.QtCore import QEvent, QSettings, Qt, Signal, Slot, QUrl, QTimer
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow, QTableWidgetItem
 
@@ -142,6 +142,9 @@ class CountryAnalysisWindow(QMainWindow):
         self._stage_base = 0
         self._last_event = {}
         self._operation_kind = 'preview'
+        self._appearance_settings = QSettings('WASE', 'WorldAddressEngine')
+        saved_mode = self._appearance_settings.value('appearance/mode', 'system')
+        self._appearance_mode = saved_mode if saved_mode in ('system', 'light', 'dark') else 'system'
         self._activity_timer = QTimer(self)
         self._activity_timer.setInterval(250)
         self._activity_timer.timeout.connect(self._refresh_activity)
@@ -158,12 +161,26 @@ class CountryAnalysisWindow(QMainWindow):
             from world_address_engine.gui.presentation import sync_workbench_fonts
             sync_workbench_fonts(self)
 
-    def _system_palette_changed(self, palette):
+    def _apply_appearance(self, palette=None):
         from PySide6.QtGui import QPalette
         from world_address_engine.gui.presentation import apply_workbench_theme
-        if not self._closing:
-            dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
-            apply_workbench_theme(self, dark=dark)
+        # The window palette is already themed: use the application's platform
+        # palette when returning from an explicit choice to System.
+        if palette is None:
+            palette = QApplication.instance().palette()
+        dark = (palette.color(QPalette.ColorRole.Window).lightness() < 128
+                if self._appearance_mode == 'system' else self._appearance_mode == 'dark')
+        apply_workbench_theme(self, dark=dark)
+
+    def _appearance_changed(self, index):
+        self._appearance_mode = self.appearance.itemData(index)
+        self._appearance_settings.setValue('appearance/mode', self._appearance_mode)
+        self._appearance_settings.sync()
+        self._apply_appearance()
+
+    def _system_palette_changed(self, palette):
+        if not self._closing and self._appearance_mode == 'system':
+            self._apply_appearance(palette)
 
     def _choose_input(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

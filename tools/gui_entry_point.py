@@ -189,6 +189,9 @@ def self_test() -> dict:
                     country_window.workbench.count() == 2
                     and country_window.workbench.widget(0) is country_window.settings_scroll
                     and country_window.settings_scroll.widget() is country_window.inputs
+                    and country_window.appearance.isVisible()
+                    and {country_window.appearance.itemData(i)
+                         for i in range(country_window.appearance.count())} == {'system', 'light', 'dark'}
                     and not country_window.diagnostics.isVisible())
                 country_input = work / 'country-synthetic.csv'
                 with country_input.open('w', encoding='utf-8-sig', newline='') as stream:

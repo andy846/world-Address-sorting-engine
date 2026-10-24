@@ -1,13 +1,12 @@
 """Build the native workbench while leaving job/controller logic in country_app."""
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, QSize, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
-    QLineEdit, QListWidget, QPushButton, QProgressBar, QScrollArea, QSizePolicy, QSplitter,
+    QLayout, QLineEdit, QListWidget, QPushButton, QProgressBar, QScrollArea, QSizePolicy, QSplitter,
     QTextEdit, QVBoxLayout, QWidget,
 )
 
 from world_address_engine.gui.country_results import CountryResultsPanel
-from world_address_engine.gui.presentation import apply_workbench_theme
 
 
 def _label(text, *, role=None, wrap=True):
@@ -95,18 +94,68 @@ class ActionBar(QWidget):
         super().resizeEvent(event)
 
 
+class WorkbenchHeader(QWidget):
+    """Keep appearance and input controls reachable with large native fonts."""
+
+    def __init__(self, logo, identity, offline, appearance, toggle):
+        super().__init__()
+        self.items = (logo, identity, offline, appearance, toggle)
+        self.grid = QGridLayout(self)
+        self.grid.setContentsMargins(0, 0, 0, 0)
+        self.grid.setSpacing(8)
+        self.grid.setSizeConstraint(QLayout.SizeConstraint.SetNoConstraint)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._compact = None
+        self._reflow()
+
+    def minimumSizeHint(self):
+        return QSize(0, self.grid.minimumSize().height())
+
+    def _reflow(self):
+        widths = [widget.minimumSizeHint().width() for widget in self.items]
+        # Ignored policies let the title shrink, but report a zero minimum.
+        # Measure the labels themselves so the breakpoint preserves their text.
+        identity = self.items[1]
+        margins = identity.layout().contentsMargins()
+        widths[1] = max(label.sizeHint().width() for label in identity.findChildren(QLabel)) + margins.left() + margins.right()
+        required = sum(widths) + self.grid.horizontalSpacing() * (len(self.items) - 1)
+        compact = self.width() < required
+        if compact == self._compact:
+            return
+        self._compact = compact
+        while self.grid.count():
+            self.grid.takeAt(0)
+        for column in range(5):
+            self.grid.setColumnStretch(column, int(column == 1))
+        if compact:
+            for widget, row, column, span in (
+                    (self.items[0], 0, 0, 1), (self.items[1], 0, 1, 2),
+                    (self.items[2], 0, 3, 2), (self.items[3], 1, 1, 2),
+                    (self.items[4], 1, 3, 2)):
+                self.grid.addWidget(widget, row, column, 1, span)
+        else:
+            for column, widget in enumerate(self.items):
+                self.grid.addWidget(widget, 0, column)
+        self.updateGeometry()
+
+    def resizeEvent(self, event):
+        self._reflow()
+        super().resizeEvent(event)
+
+
 def build_workbench(w, discover_pack):
     root = QWidget()
     root.setObjectName('workbenchRoot')
     outer = QVBoxLayout(root)
     outer.setContentsMargins(16, 12, 16, 10)
     outer.setSpacing(10)
-    header = QHBoxLayout()
     logo = QLabel()
     logo.setPixmap(w.windowIcon().pixmap(38, 38))
     logo.setFixedSize(40, 40)
-    header.addWidget(logo)
-    titles = QVBoxLayout()
+    identity = QWidget()
+    identity.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+    titles = QVBoxLayout(identity)
+    titles.setContentsMargins(0, 0, 0, 0)
     titles.setSpacing(0)
     title = _label('World Address Sorting Engine', wrap=False)
     title.setProperty('workbenchRole', 'title')
@@ -116,17 +165,31 @@ def build_workbench(w, discover_pack):
     title.setFont(font)
     titles.addWidget(title)
     titles.addWidget(_label('COUNTRY ANALYSIS  /  OFFLINE WORKSPACE', role='muted', wrap=False))
-    header.addLayout(titles, 1)
     offline = _label('LOCAL ONLY', role='badge', wrap=False)
     offline.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred)
     offline.setToolTip('Input addresses and reference data are processed on this computer.')
-    header.addWidget(offline)
+    appearance_box = QWidget()
+    appearance_group = QVBoxLayout(appearance_box)
+    appearance_group.setContentsMargins(0, 0, 0, 0)
+    appearance_group.setSpacing(2)
+    w.appearance = QComboBox()
+    w.appearance.setObjectName('appearanceSelector')
+    w.appearance.setAccessibleName('Appearance')
+    w.appearance.setToolTip('System follows your computer; Light and Dark stay as selected. Your choice is saved.')
+    for text, mode in (('System', 'system'), ('Light', 'light'), ('Dark', 'dark')):
+        w.appearance.addItem(text, mode)
+    w.appearance.setCurrentIndex(w.appearance.findData(w._appearance_mode))
+    w.appearance.currentIndexChanged.connect(w._appearance_changed)
+    appearance_label = _label('&Appearance', wrap=False)
+    appearance_label.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Preferred)
+    appearance_label.setBuddy(w.appearance)
+    appearance_group.addWidget(appearance_label)
+    appearance_group.addWidget(w.appearance)
     w.input_toggle = QPushButton('Hide input settings')
     w.input_toggle.setCheckable(True)
     w.input_toggle.setChecked(True)
     w.input_toggle.toggled.connect(w._toggle_inputs)
-    header.addWidget(w.input_toggle)
-    outer.addLayout(header)
+    outer.addWidget(WorkbenchHeader(logo, identity, offline, appearance_box, w.input_toggle))
 
     w.workbench = QSplitter(Qt.Orientation.Horizontal)
     w.workbench.setChildrenCollapsible(False)
@@ -308,4 +371,4 @@ def build_workbench(w, discover_pack):
     outer.addWidget(w.diagnostics)
     w.setCentralWidget(root)
     w.statusBar().showMessage('Ready for offline country analysis.')
-    apply_workbench_theme(w)
+    w._apply_appearance()
