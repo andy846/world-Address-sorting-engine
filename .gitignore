@@ -24,6 +24,10 @@ packs/
 # Job output. The .job-state folder stores plaintext recipient address rows
 # as local JSONL checkpoints and must never be committed or uploaded.
 .job-state/
+.country-state/
+.country-finalize/
+.country-finalization.json
+*-country-analysis/
 test-output/
 out/
 
@@ -31,6 +35,7 @@ out/
 Classified_Addresses*.csv
 Manual_Review.csv
 Country_Summary.csv
+Country_Diagnostics.csv
 Review_Corrections.csv
 review_decisions.jsonl
 DATA_CLASS.txt

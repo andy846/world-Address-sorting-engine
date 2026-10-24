@@ -8,12 +8,14 @@ from collections import Counter
 import json
 from pathlib import Path
 import sys
+from typing import Callable
 from world_address_engine.io.delimited import iter_csv_records, iter_txt_records
 
 
 def preview(path: Path, encoding: str = 'utf-8-sig', address_columns: tuple[str,...] = (),
             sheet_name: str | None = None, txt_mode: str = 'line',
-            delimiter: str | None = None) -> dict:
+            delimiter: str | None = None, *,
+            cancel_requested: Callable[[], bool] | None = None) -> dict:
     kind=path.suffix.lower()
     if kind=='.csv':
         rows=iter_csv_records(path,encoding,address_columns)
@@ -31,17 +33,24 @@ def preview(path: Path, encoding: str = 'utf-8-sig', address_columns: tuple[str,
         raise ValueError('Unsupported input format: use .csv, .xlsx or .txt')
     total=0;issues=0; extras=0; empty=0; lines=Counter()
     headers=[]; used=[]
-    for record in rows:
-        total+=1
-        if total==1:
-            headers=list(record.fields)
-            used=list(address_columns) if address_columns else [x for x in headers if x.startswith('NAME_ADDRESS_LINE')]
-            if not used and kind=='.txt': used=[x for x in headers if x.startswith('Text_')]
-        issues+=bool(record.input_error)
-        extras+=any(v for k,v in record.fields.items() if k.startswith('Unnamed_'))
-        empty+=not bool(record.address_text.strip())
-        lines[len([v for v in record.address_text.splitlines() if v.strip()])]+=1
-    return {
+    cancelled = False
+    try:
+        for record in rows:
+            if cancel_requested is not None and cancel_requested():
+                cancelled = True
+                break
+            total+=1
+            if total==1:
+                headers=list(record.fields)
+                used=list(address_columns) if address_columns else [x for x in headers if x.startswith('NAME_ADDRESS_LINE')]
+                if not used and kind=='.txt': used=[x for x in headers if x.startswith('Text_')]
+            issues+=bool(record.input_error)
+            extras+=any(v for k,v in record.fields.items() if k.startswith('Unnamed_'))
+            empty+=not bool(record.address_text.strip())
+            lines[len([v for v in record.address_text.splitlines() if v.strip()])]+=1
+    finally:
+        rows.close()
+    result = {
         'input_file':path.name, 'format':kind.lstrip('.'), 'total_records':total,
         'original_columns':len(headers), 'address_columns':used,
         'records_with_extra_unnamed_data':extras,
@@ -49,6 +58,9 @@ def preview(path: Path, encoding: str = 'utf-8-sig', address_columns: tuple[str,
         'nonempty_address_line_distribution':dict(sorted(lines.items())),
         'classifications_run':False,
     }
+    if cancelled:
+        result['cancelled'] = True
+    return result
 
 
 def main(argv: list[str] | None=None) -> int:
@@ -83,6 +95,21 @@ def main(argv: list[str] | None=None) -> int:
                           help='Deprecated compatibility flag; verification is always enabled')
     classify.add_argument('--keep-checkpoint', action='store_true',
                         help='Keep the plaintext customer checkpoint shards after the run')
+    analyze = sub.add_parser('analyze', help='Estimate country codes fully offline without an HKP database')
+    analyze.add_argument('--input', type=Path, required=True)
+    analyze.add_argument('--output', type=Path, required=True)
+    analyze.add_argument('--geo-db', type=Path, required=True)
+    analyze.add_argument('--catalogue', type=Path)
+    analyze.add_argument('--encoding', default='utf-8-sig')
+    analyze.add_argument('--address-column', action='append', default=[])
+    analyze.add_argument('--record-id-column')
+    analyze.add_argument('--sheet')
+    analyze.add_argument('--txt-mode', choices=['line', 'delimited'], default='line')
+    analyze.add_argument('--delimiter')
+    analyze.add_argument('--batch-size', type=int, default=1000)
+    analyze.add_argument('--max-batches', type=int)
+    analyze.add_argument('--keep-checkpoint', action='store_true',
+                         help='Keep sensitive plaintext country checkpoint shards after completion')
     resume = sub.add_parser('resume', help='Resume a paused run with source and data-pack integrity checks')
     resume.add_argument('--job-dir', type=Path, required=True)
     resume.add_argument('--max-batches', type=int)
@@ -107,6 +134,22 @@ def main(argv: list[str] | None=None) -> int:
                            approval_manifest=args.approval_manifest,
                            approval_key=args.approval_key,
                            keep_checkpoint=args.keep_checkpoint)
+        elif args.command == 'analyze':
+            from world_address_engine.jobs.country_analysis import analyze_job
+            options = {'encoding': args.encoding, 'address_columns': args.address_column,
+                       'record_id_column': args.record_id_column, 'sheet_name': args.sheet,
+                       'txt_mode': args.txt_mode, 'delimiter': args.delimiter}
+            report = analyze_job(args.input, args.output, args.geo_db, options,
+                                 catalogue_path=args.catalogue, batch_size=args.batch_size,
+                                 max_batches=args.max_batches, keep_checkpoint=args.keep_checkpoint)
+        elif any((args.job_dir / name).is_dir()
+                 for name in ('.country-state', '.country-finalize')) or (
+                (args.job_dir / 'Run_Manifest.json').is_file()
+                and json.loads((args.job_dir / 'Run_Manifest.json').read_text(encoding='utf8'))
+                    .get('job_kind') == 'country-analysis'):
+            from world_address_engine.jobs.country_analysis import resume_analysis
+            report = resume_analysis(args.job_dir, max_batches=args.max_batches,
+                                     keep_checkpoint=args.keep_checkpoint)
         else:
             from world_address_engine.jobs.runner import resume_job
             report=resume_job(args.job_dir,max_batches=args.max_batches,

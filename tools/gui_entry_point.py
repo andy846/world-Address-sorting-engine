@@ -70,6 +70,20 @@ def report_errors(report, *, expected_version: str, require_frozen: bool = False
               if type(report.get(name)) is not type(value) or report[name] != value]
     if report.get('error'):
         errors.append('error')
+    expected_country = {
+        'window_shown': True, 'mapping_entries': 235, 'total_records': 4,
+        'destination_counts': {'CN': 1, 'HK': 1, 'JP': 1}, 'unresolved': 1,
+        'normalization_loaded': True,
+    }
+    if report.get('country_analysis') != expected_country:
+        errors.append('country_analysis')
+    expected_feedback = {'icon_loaded': True, 'stage_events_observed': True,
+                         'address_line_order_preserved': True,
+                         'workbench_ready': True,
+                         'summary_total': '4', 'summary_pending': '1',
+                         'pending_rows': 1, 'first_pending_record': '4'}
+    if report.get('gui_feedback') != expected_feedback:
+        errors.append('gui_feedback')
     for name, rows in (('preview', 9604), ('xlsx_preview', 1)):
         preview = report.get(name)
         shape = {'total_records': rows, 'original_columns': 12,
@@ -156,6 +170,73 @@ def self_test() -> dict:
                 report['approval_refused'] = str(exc) == APPROVAL_REFUSAL
                 report['classification_error'] = str(exc)
             report['classification_output_created'] = output.exists()
+            from world_address_engine.data.country_codes import load_country_codes
+            from world_address_engine.gui.country_app import CountryAnalysisWindow, _read_country_export
+            from world_address_engine.jobs.country_analysis import analyze_job
+            from world_address_engine.matching.normalize import _converter
+
+            country_window = CountryAnalysisWindow()
+            try:
+                line_columns = ['Line 1', 'Line 2', 'Line 3']
+                country_window.address_columns.addItems(line_columns)
+                for index in (1, 2, 0):
+                    country_window.address_columns.item(index).setSelected(True)
+                line_order_preserved = country_window._input_options()['address_columns'] == line_columns
+                country_window.address_columns.clear()
+                country_window.show()
+                app.processEvents()
+                workbench_ready = (
+                    country_window.workbench.count() == 2
+                    and country_window.workbench.widget(0) is country_window.settings_scroll
+                    and country_window.settings_scroll.widget() is country_window.inputs
+                    and country_window.appearance.isVisible()
+                    and {country_window.appearance.itemData(i)
+                         for i in range(country_window.appearance.count())} == {'system', 'light', 'dark'}
+                    and not country_window.diagnostics.isVisible())
+                country_input = work / 'country-synthetic.csv'
+                with country_input.open('w', encoding='utf-8-sig', newline='') as stream:
+                    writer = csv.writer(stream)
+                    writer.writerow(['Address', 'Control no'])
+                    for index, address in enumerate(('Hong Kong', 'China', 'Japan', ''), 1):
+                        writer.writerow([address, f'{index:04d}'])
+                stage_events = []
+                country_output = work / 'country-output'
+                country_report = analyze_job(
+                    country_input, country_output, geo_db,
+                    {'address_columns': ['Address']}, on_event=stage_events.append)
+                country_window._output_dir = country_output
+                country_window._apply_analysis(_read_country_export(country_output, country_report))
+                app.processEvents()
+                stages = {event['stage'] for event in stage_events}
+                panel = country_window.results
+                workbench_ready = (workbench_ready
+                                   and len(panel.metric_cards) == 4
+                                   and '4' in panel.total_value.accessibleName()
+                                   and '1' in panel.pending_value.accessibleName())
+                report['gui_feedback'] = {
+                    'icon_loaded': not country_window.windowIcon().isNull(),
+                    'address_line_order_preserved': line_order_preserved,
+                    'workbench_ready': workbench_ready,
+                    'stage_events_observed': {'validating', 'hashing_pack', 'classifying',
+                                              'exporting', 'finalizing', 'complete'} <= stages,
+                    'summary_total': panel.total_value.text(),
+                    'summary_pending': panel.pending_value.text(),
+                    'pending_rows': panel.case_table.rowCount(),
+                    'first_pending_record': panel.case_table.item(0, 0).text()
+                    if panel.case_table.rowCount() else None,
+                }
+                report['country_analysis'] = {
+                    'window_shown': country_window.isVisible(),
+                    'mapping_entries': len(load_country_codes().entries),
+                    'total_records': country_report['total_records'],
+                    'destination_counts': country_report['destination_counts'],
+                    'unresolved': country_report['status_counts']['UNRESOLVED'],
+                    'normalization_loaded': all(_converter(kind) is not None
+                                                for kind in ('t2s', 's2t')),
+                }
+            finally:
+                country_window.close()
+                app.processEvents()
     finally:
         window.close()
         app.processEvents()

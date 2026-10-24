@@ -625,6 +625,10 @@ def retrieve_candidates(geo_db: Path, address_forms: tuple[str, ...],
             term_support=tuple(sorted(
                 ((canonical, weight) for canonical, (weight, _) in contributions.items()),
                 key=lambda item: (-item[1], item[0]))),
+            place_support=tuple(sorted(
+                ((canonical, weight, place_id)
+                 for canonical, (weight, place_id) in contributions.items()),
+                key=lambda item: (-item[1], item[0]))),
         ))
 
     results.sort(key=lambda c: (-c.support, c.destination_id))
@@ -647,5 +651,5 @@ def retrieve_candidates(geo_db: Path, address_forms: tuple[str, ...],
                 ("STRUCTURED_COUNTRY_HINT",) + hinted.evidence,
                 hinted.score, hinted.support, hinted.token_count,
                 hinted.country_entity, hinted.entity_terms,
-                hinted.entity_feature_codes, hinted.term_support)
+                hinted.entity_feature_codes, hinted.term_support, hinted.place_support)
     return results[:limit]
