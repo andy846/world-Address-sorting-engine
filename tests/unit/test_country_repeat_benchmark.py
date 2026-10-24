@@ -70,6 +70,28 @@ def test_regional_benchmark_pins_selection_and_refuses_disabled_or_changed_pack(
         module.run_workload(work, pack, hk_regional_db=regional, resume=True)
 
 
+def test_verification_rejects_wrong_regional_selection_even_if_all_csvs_match(tmp_path):
+    from tests.unit.test_hk_regional_pack import fixture_pack
+    source, _, pack = seed(tmp_path)
+    regional, _ = fixture_pack(tmp_path / 'regional')
+    baseline = tmp_path / 'regional-baseline'
+    analyze_job(source, baseline, pack, hk_regional_db=regional)
+    module = tool()
+    work = tmp_path / 'private'
+    info = module.prepare_workload(source, baseline, controls(tmp_path), work, pack,
+                                   repeats=2, control_rows=1, hk_regional_db=regional)
+    for name, selected in [('correct', regional), ('wrong', None)]:
+        analyze_job(work / 'dataset.csv', work / name, pack,
+                    {'address_columns': info['address_columns']}, hk_regional_db=selected)
+    for name in ('Classified_Addresses.csv', 'Country_Diagnostics.csv', 'Country_Summary.csv'):
+        assert (work / 'correct' / name).read_bytes() == (work / 'wrong' / name).read_bytes()
+    with pytest.raises(ValueError, match='regional'):
+        module.verify_workload(work, 'wrong')
+    with pytest.raises(ValueError, match='regional'):
+        module.verify_workload(work, 'correct', compare='wrong')
+    assert module.verify_workload(work, 'correct')['verified']
+
+
 def test_preparation_repeats_complete_blocks_and_preserves_original_fields(tmp_path):
     source, baseline, pack = seed(tmp_path)
     before = source.read_bytes()

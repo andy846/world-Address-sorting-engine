@@ -319,6 +319,10 @@ def verify_workload(workspace, name='uninterrupted', compare=None):
     info, oracle = _load_workload(workspace)
     if file_sha256(workspace / 'dataset.csv') != info['dataset_sha256']:
         raise ValueError('benchmark dataset hash changed')
+    for run in [name, *([_safe_name(compare)] if compare else [])]:
+        manifest = json.loads((workspace / run / 'Run_Manifest.json').read_text(encoding='utf-8-sig'))
+        if manifest.get('run_metadata', {}).get('hk_regional') != info.get('hk_regional'):
+            raise ValueError('verified run regional selection differs from the pinned workload')
     started = time.perf_counter()
     result = verify_repeated_output(workspace / 'dataset.csv', workspace / name,
                                     oracle['block'], oracle['repeats'])
