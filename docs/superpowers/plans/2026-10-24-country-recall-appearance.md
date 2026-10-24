@@ -23,7 +23,7 @@ fine-tuning and visible-theme-setting request; routine choices are the builder's
   foreign overrides, separated genuine conflicts and Qt object lifetime.
 - [x] Replay all 9,604 private rows into a new ignored folder; compare all codes,
   preserve every original field/row and record only aggregate measurements.
-- [ ] Run complete real-pack regressions and frozen offline Windows self-test;
+- [x] Run complete real-pack regressions and frozen offline Windows self-test;
   commit/push existing draft branch and record remaining acceptance gates.
 
 ## Constraints and review focus
