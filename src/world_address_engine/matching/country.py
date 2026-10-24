@@ -10,9 +10,10 @@ import unicodedata
 
 from world_address_engine.matching.normalize import normalize_address, normalize_key
 from world_address_engine.matching.retrieve import retrieve_candidates, OccurrenceLimitExceeded
+from world_address_engine.data.geonames_builder import normalize_search_key
 from world_address_engine.models import AddressRecord
 
-COUNTRY_RULES_VERSION = '2026-10-24.country.3'
+COUNTRY_RULES_VERSION = '2026-10-24.country.4'
 RIVAL_RATIO = 0.55
 MAX_ADDRESS_CHARS = 10_000
 
@@ -86,6 +87,12 @@ HK_AREAS = (
     '锦田', '八鄉', '八乡', '流浮山', '沙頭角', '沙头角', '太古',
     '大坑', '新田', '落馬洲', '落马洲',
     'shek mun', 'lai king', '石門', '石门', '荔景',
+    'tin hau', 'kwai fong', 'kwai hing', 'kwai shing', 'tiu keng leng',
+    'so kwun wat', 'ma wan', 'mei foo sun chuen', 'on lok tsuen',
+    'clearwater bay', 'clear water bay', 'kln bay', 'symphony bay',
+    '天后', '葵芳', '葵興', '葵兴', '葵盛', '調景嶺', '调景岭',
+    '掃管笏', '扫管笏', '馬灣', '马湾', '美孚新邨', '安樂村', '安乐村',
+    '清水灣', '清水湾',
 )
 HK_AREAS = tuple(dict.fromkeys((*HK_AREAS, *(name.replace(' ', '')
                             for name in HK_AREAS if ' ' in name))))
@@ -101,30 +108,46 @@ CN_REGIONS = (
     'shaanxi', 'shanxi', 'liaoning', 'jilin', 'heilongjiang', 'gansu',
     'qinghai', 'ningxia', 'xinjiang', 'tibet', 'inner mongolia',
     '深圳', '廣州', '广州', '杭州', 'shenzhen', 'guangzhou', 'hangzhou',
+    '西安', '中山市', '合肥市', '惠東縣', '惠东县', '陽江市', '阳江市', '南山區', '南山区',
+    '广洲市天河区', '廣洲市天河區',
 )
 _COMPANY = re.compile(
     r'\b(?:ltd|limited|inc|llc|corp|corporation|company|bank|holdings|trading|logistics)\b'
     r'|有限公司|公司|集團|集团|銀行|银行|china\s+(?:mobile|eastern|southern)', re.I)
 _ADDRESS = re.compile(r'\d|\b(?:road|street|avenue|lane|flat|floor|block|room)\b|[路街巷弄號号樓楼]', re.I)
 _RECIPIENT = re.compile(r'^(?:mr|mrs|ms|miss|dr|prof|attn|attention)\.?\s|^(?:收件人|聯絡人|联系人)', re.I)
-_STREET_AFTER = re.compile(r'^\s*(?:street|st|road|rd|avenue|ave|lane|ln|drive|dr|boulevard|blvd)\b|^[街路巷弄]', re.I)
+_STREET_AFTER = re.compile(r'^\s*(?:street|st|road|rd|avenue|ave|lane|ln|drive|dr|boulevard|blvd)\b|^\s*[東东西南北中]?\s*[街路巷弄]', re.I)
 _STREET_TERM = re.compile(r'\b(?:street|st|road|rd|avenue|ave|lane|ln|drive|dr|boulevard|blvd)$|[街路巷弄]$', re.I)
 _STREET_ADDRESS = re.compile(
     r'^\s*\d+[a-z]?\s+.+\b(?:street|st|road|rd|avenue|ave|lane|ln|drive|dr|boulevard|blvd)\b', re.I)
 _BUILDING_AFTER = re.compile(
-    r'^\s*(?:centre|center|building|tower|plaza|house|bank|university|hospital)\b'
+    r'^\s*(?:centre|center|building|tower|plaza|house|bank|university|hospital|industrial\s+park)\b'
     r'|^\s*(?:中心|大廈|大厦|大樓|大楼|廣場|广场|銀行|银行|大學|大学|橋|桥)'
-    r'|^\s*(?:國際|国际)?(?:商務|商务|商業|商业)(?:大廈|大厦|中心|樓|楼)', re.I)
+    r'|^\s*(?:國際|国际)?(?:商務|商务|商業|商业)(?:大廈|大厦|中心|樓|楼)'
+    r'|^\s*(?:工業園|工业园|工業區|工业区)', re.I)
 _HK_SHARED_LOCALITIES = frozenset({'sha tau kok', 'shataukok', '沙頭角', '沙头角',
                               'lok ma chau', 'lokmachau', '落馬洲', '落马洲',
                               '沙田', '半山', '中環', '中环'})
 _HK_CENTRAL_STREETS = re.compile(
     r'\b(?:des\s+voeux\s+(?:road|rd)|connaught\s+(?:road|rd|place)|'
-    r'wing\s+kut\s+(?:street|st))\b')
+    r'wing\s+kut\s+(?:street|st)|ice\s+house\s+(?:street|st)|'
+    r'wellington\s+(?:street|st)|queen\s+victoria\s+(?:street|st))\b')
 _HK_JORDAN_STREETS = re.compile(
     r'\b(?:tak\s+hing|nanking|woosung|woo\s+sung|nathan|canton)\s+(?:street|st|road|rd)\b')
 _HK_TST_TAIL = re.compile(r'(?<![a-z])t\.?\s*s\.?\s*t\.?(?![a-z])'
-                          r'(?:[\s,]+kl[n]?)?\s*[,.;]*$')
+                          r'(?:\s+east)?(?:[\s,]+kl[n]?)?\s*[,.;]*$')
+_HK_KL_STREETS = re.compile(
+    r'\b(?:nathan\s+(?:road|rd)|argyle\s+(?:street|st)|'
+    r'nanking\s+(?:street|st)|granville\s+(?:road|rd)|'
+    r'fa\s+yuen\s+(?:street|st)|shing\s+yip\s+(?:street|st)|'
+    r'lam\s+hing\s+(?:street|st)|castle\s+peak\s+(?:road|rd)|kwong\s+wa\s+(?:street|st)|'
+    r'kwong\s+cheung\s+(?:street|st)|lock\s+(?:road|rd)|'
+    r'prince\s+edward\s+(?:road|rd)\s+east)\b')
+_HK_NT_STREETS = re.compile(
+    r'\b(?:tai\s+lin\s+pai|kwai\s+cheong|cheung\s+tat|kwai\s+fat)\s+(?:road|rd)\b'
+    r'|\bkwai\s+fung\s+crescent\b')
+_NT_TAIL = re.compile(r'(?<![a-z])n\.?\s*t\.?\s*[,.;]*$')
+_UK_POSTCODE_TAIL = re.compile(r'\b(?:gir\s*0aa|[a-z]{1,2}\d[a-z\d]?\s*\d[a-z]{2})\s*[,.;]*$')
 
 
 def _location_lines(lines):
@@ -175,6 +198,26 @@ def _hk_context(lines):
     if _contains(scope, 'jordan') and _HK_JORDAN_STREETS.search(scope):
         return True
     if _contains(scope, 'central') and _HK_CENTRAL_STREETS.search(scope):
+        return True
+    if re.search(r"\bqueen['’]?s\s+(?:road|rd)\s+central\b", scope):
+        return True
+    if re.search(r'\bdes\s+voeux\s+(?:road|rd)\s+centralhong\s+kong\b', scope):
+        return True
+    if (_HK_KL_STREETS.search(scope) and
+            re.search(r'(?<![a-z])(?:hk\s+)?kl\s*[,.;]*$', lines[-1][1])):
+        return True
+    if _NT_TAIL.search(scope) and (_HK_NT_STREETS.search(scope) or
+                                   _contains(scope, 'kwai chng')):
+        return True
+    if (_contains(scope, 'aberdeen') and
+            re.search(r'\bwong\s+chuk\s+hang\s+(?:road|rd)\b', scope)):
+        return True
+    if (_contains(scope, 'admiralty') and re.search(r'\bqueenway\b', scope)):
+        return True
+    if (_contains(scope, 'lippo centre') and re.search(r'\bqueensway\b', scope)):
+        return True
+    if (_contains(scope, 'the arch') and
+            re.search(r'\baustin\s+(?:road|rd)\s+west\b', scope)):
         return True
     if (_contains(scope, 'tsim sha tsui centre') and
             re.search(r'\bmody\s+(?:road|rd)\b', scope)):
@@ -326,7 +369,31 @@ class CountryClassifier:
                         continue
                     suffix = line[match.end():]
                     jordan_local = code == 'JO' and alias == 'jordan' and hk_jordan and not jordan_destination
-                    if _STREET_AFTER.match(suffix) or _BUILDING_AFTER.match(suffix) or jordan_local:
+                    # Lexical names are not separate country occurrences:
+                    # New South Wales; 泰国际/德国际; China Hong Kong City.
+                    embedded_name = (
+                        (alias.endswith(('国', '國')) and suffix.startswith(('际', '際'))) or
+                        (code == 'GB' and alias == 'wales' and
+                         re.search(r'\bnew\s+south\s+$', line[:match.start()])) or
+                        (code == 'CN' and index + 1 < len(lines) and not suffix.strip(' ,.;') and
+                         line.strip(' ,.;') != alias and
+                         re.search(r'\b(?:tower|building|centre|center|plaza|house)\b', line[:match.start()]) and
+                         re.match(r'hong\s+kong\s+city\b', lines[index + 1])) or
+                        (code == 'HK' and re.search(r'\bshenzhen\s*-\s*$', line[:match.start()]) and
+                         index + 1 < len(lines) and
+                         re.search(r'\b(?:workshop|industrial\s+park|centre|center)\b', lines[index + 1]))
+                    )
+                    # Parent-country prefixes in a single territory expression
+                    # must not erase independent country lines elsewhere.
+                    territory_suffix = re.match(r'(?:香港|澳門|澳门)', suffix)
+                    parent_prefix = (code == 'CN' and territory_suffix and
+                                     not (_STREET_AFTER.match(suffix[territory_suffix.end():]) or
+                                          _BUILDING_AFTER.match(suffix[territory_suffix.end():])))
+                    if parent_prefix:
+                        spans.append(match.span())
+                        continue
+                    if (_STREET_AFTER.match(suffix) or _BUILDING_AFTER.match(suffix) or
+                            jordan_local or embedded_name):
                         spans.append(match.span())
                         blocked.append(match.span())
                         continue
@@ -363,6 +430,9 @@ class CountryClassifier:
             return (None, 'UNRESOLVED', 'CONFLICTING_COUNTRIES', (), tuple(sorted(explicit)))
         if explicit:
             return (next(iter(explicit)), 'DETERMINED', 'EXPLICIT_COUNTRY', (), ())
+        if ('returned mail unknown address' in lines and not hint and
+                not any(_ADDRESS.search(line) for line in lines)):
+            return (None, 'UNRESOLVED', 'RETURNED_MAIL_NO_ADDRESS', (), ())
 
         # The first line remains available when it is geographic; a recipient
         # or business name is not allowed to supply regional evidence alone.
@@ -379,9 +449,15 @@ class CountryClassifier:
             if not (mainland_admin and hk_names and hk_names <= _HK_SHARED_LOCALITIES and not separate_hk):
                 return (None, 'UNRESOLVED', 'CONFLICTING_ADMINISTRATIVE_REGIONS', (), ('CN', 'HK'))
         if cn and 'CN' in self.catalogue.entries:
-            return ('CN', 'INFERRED', 'MAINLAND_ADMINISTRATIVE_REGION', (), ())
+            return self._context_result('CN', 'MAINLAND_ADMINISTRATIVE_REGION', address_lines)
         if hk and 'HK' in self.catalogue.entries:
-            return ('HK', 'INFERRED', 'HONG_KONG_LOCALITY', (), ())
+            return self._context_result('HK', 'HONG_KONG_LOCALITY', address_lines)
+        if ('GB' in self.catalogue.entries and _contains(scope, 'london') and
+                _UK_POSTCODE_TAIL.search(scope)):
+            return self._context_result('GB', 'LONDON_POSTCODE_CONTEXT', address_lines)
+        if ('KR' in self.catalogue.entries and _contains(scope, 'seoul') and
+                re.search(r'\bkorea\s*[,.;]*$', scope)):
+            return self._context_result('KR', 'KOREAN_CAPITAL_CONTEXT', address_lines)
         if not scope or not (_ADDRESS.search(scope) or len(lines) > 1):
             return (None, 'UNRESOLVED', 'NO_ADDRESS_CONTEXT', (), ())
         try:
@@ -403,6 +479,37 @@ class CountryClassifier:
         if len(ordered) > 1 and grouped[ordered[1]].support >= grouped[leader].support * RIVAL_RATIO:
             return (None, 'UNRESOLVED', 'MULTIPLE_PLAUSIBLE_COUNTRIES', (), tuple(ordered[:5]))
         return (leader, 'INFERRED', 'GEOGRAPHIC_LEADER', (), tuple(ordered[:5]))
+
+    def _context_result(self, code, reason, lines):
+        """Do not discard an independent, whole-line foreign metropolis.
+
+        Exact indexed keys avoid treating apartment letters, street substrings
+        and incidental tiny homonyms as rival city destinations. This only
+        withdraws a contextual estimate; it never overrides explicit countries.
+        """
+        keys = sorted({normalize_search_key(form) for line in lines
+                       if not _ADDRESS.search(line)
+                       for form in normalize_address(line.strip(' ,.;'))
+                       if (len(re.findall(r'[a-z]', form)) >= 4 or
+                           len(re.findall(r'[\u3400-\u9fff]', form)) >= 2)})
+        rivals = set()
+        if keys:
+            if self._db is None:
+                self._db = sqlite3.connect(self.geo_db.resolve().as_uri() + '?mode=ro', uri=True)
+                self._db.execute('PRAGMA query_only=ON')
+            for start in range(0, len(keys), 200):
+                chunk = keys[start:start + 200]
+                rows = self._db.execute(
+                    'SELECT DISTINCT p.country_code FROM geo_aliases a '
+                    'JOIN geo_places p ON p.place_id=a.place_id '
+                    'WHERE a.search_key IN (' + ','.join('?' * len(chunk)) + ') '
+                    "AND p.feature_class='P' AND (p.feature_code='PPLC' OR p.population>=1000000)", chunk)
+                rivals.update(mapped for country, in rows
+                              if (mapped := self.catalogue.geo_to_code.get(country)) in self.catalogue.entries
+                              and mapped != code)
+        if rivals:
+            return (None, 'UNRESOLVED', 'CONFLICTING_GEOGRAPHIC_CONTEXT', (), tuple(sorted({code, *rivals})))
+        return (code, 'INFERRED', reason, (), ())
 
     def _substantial_candidates(self, candidates, scope):
         if not candidates:
