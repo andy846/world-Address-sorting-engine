@@ -43,7 +43,12 @@ class WorkspaceScrollArea(QScrollArea):
             width = self.viewport().width()
             widget.resize(width, widget.height())
             widget.layout().activate()
-            height = max(self.viewport().height(), widget.minimumSizeHint().height())
+            # minimumSizeHint omits wrapped QLabel height; preferred heights, on
+            # the other hand, over-allocate tables and editors. Add only wrapping.
+            wrapping = sum(max(0, label.heightForWidth(label.width()) - label.minimumSizeHint().height())
+                           for label in widget.findChildren(QLabel)
+                           if label.wordWrap() and label.isVisibleTo(widget) and label.width() > 0)
+            height = max(self.viewport().height(), widget.minimumSizeHint().height() + wrapping)
             widget.resize(width, height)
         finally:
             self._fitting = False

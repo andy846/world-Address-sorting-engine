@@ -11,7 +11,7 @@ from time import monotonic
 
 from PySide6.QtCore import QEvent, Qt, Signal, Slot, QUrl, QTimer
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QFileDialog, QMainWindow, QTableWidgetItem
+from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow, QTableWidgetItem
 
 from world_address_engine.gui.app import WorkerThread, _LIVE_THREADS, _thread_finished
 from world_address_engine.gui.branding import apply_branding
@@ -146,6 +146,7 @@ class CountryAnalysisWindow(QMainWindow):
         self._activity_timer.setInterval(250)
         self._activity_timer.timeout.connect(self._refresh_activity)
         self._build()
+        QApplication.instance().paletteChanged.connect(self._system_palette_changed)
 
     def _build(self) -> None:
         from world_address_engine.gui.country_layout import build_workbench
@@ -156,6 +157,13 @@ class CountryAnalysisWindow(QMainWindow):
         if event.type() == QEvent.Type.FontChange and hasattr(self, 'results'):
             from world_address_engine.gui.presentation import sync_workbench_fonts
             sync_workbench_fonts(self)
+
+    def _system_palette_changed(self, palette):
+        from PySide6.QtGui import QPalette
+        from world_address_engine.gui.presentation import apply_workbench_theme
+        if not self._closing:
+            dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
+            apply_workbench_theme(self, dark=dark)
 
     def _choose_input(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

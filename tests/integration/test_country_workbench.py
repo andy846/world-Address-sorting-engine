@@ -190,6 +190,45 @@ def test_initial_case_failure_is_visible_partial_success_and_retry_clears_warnin
     assert 'unavailable' not in window.results.headline.text().lower()
 
 
+def test_large_text_populated_cases_do_not_overlap_after_reopening_settings(window, app):
+    from PySide6.QtGui import QFontDatabase
+    from tests.integration.test_country_gui import report
+    if os.name == 'nt':
+        QFontDatabase.addApplicationFont('C:/Windows/Fonts/segoeui.ttf')
+        window.setFont(QFont('Segoe UI', 18))
+    else:
+        window.setFont(QFont(window.font().family(), 18))
+    window.resize(960, 720)
+    window.show()
+    window._apply_analysis({'report': report(), 'rows': [('JP', 'Japan', 5)],
+                            'case_page': {'rows': [], 'has_next': False, 'next_cursor': 0}})
+    window.input_toggle.setChecked(True)
+    for _ in range(4):
+        app.processEvents()
+    table, detail = window.results.case_table, window.results.case_detail
+    assert table.height() >= 100
+    assert detail.height() >= 64
+    assert table.geometry().bottom() < detail.geometry().top()
+    assert window.size().width() == 960 and window.size().height() == 720
+
+
+def test_system_palette_change_rethemes_the_owned_workbench(window, app):
+    from PySide6.QtGui import QColor, QPalette
+    original = QPalette(app.palette())
+    old_styles = app.styleSheet()
+    try:
+        for color, expected in (('#101820', 'dark'), ('#f5f7fa', 'light')):
+            palette = QPalette(original)
+            palette.setColor(QPalette.ColorRole.Window, QColor(color))
+            app.setPalette(palette)
+            app.processEvents()
+            assert window.property('workbenchTheme') == expected
+            assert app.styleSheet() == old_styles
+    finally:
+        app.setPalette(original)
+        app.processEvents()
+
+
 @pytest.mark.parametrize('kind', ['csv', 'xlsx'])
 def test_workbench_reports_equal_direct_runner_with_reversed_column_clicks(window, app, tmp_path, kind):
     import csv
