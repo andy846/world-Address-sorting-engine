@@ -37,11 +37,11 @@ addresses, and duplicate the whole list 100 times.
 - [x] Implement fresh-process run/progress/validation, streaming full row/result
   comparison, source/baseline hash preservation, numeric RSS/disk metrics and
   cooperative cancellation/resume; test with a small synthetic pack/workload.
-- [ ] Independently review tooling and controls, fix important findings, run
+- [x] Independently review tooling and controls, fix important findings, run
   full regression and commit the reproducible public tool.
-- [ ] Prepare and run the private million-row workload; verify completion,
+- [x] Prepare and run the private million-row workload; verify completion,
   summary arithmetic, controls, no lost/shifted rows and checkpoint cleanup.
-- [ ] Complete recovery comparison in fresh processes, report measured times,
+- [x] Complete recovery comparison in fresh processes, report measured times,
   peak memory and sizes, limitations and remaining low-duplication/5M gates.
 
 ## Acceptance
@@ -75,4 +75,7 @@ No estimated timing or synthetic accuracy is presented as measured evidence.
   preserved but excluded from final measurements; reviewed workspace is new.
 - Full real-pack regression: 1,287 passed, 1 skipped, 2 existing xfails;
   latest focused tool/verifier/cache checks: 85 passed with warnings as errors.
-  Formal million-row timing and recovery results are still pending.
+  Completed million-row job: 152.847 seconds, 73,265,152-byte peak working set.
+  Cancelled at 500,000 rows; fresh-process resume completed in 151.896 seconds.
+  Every row matched the oracle and all three CSVs were byte-identical. Detailed
+  measurements and limits: docs/REPEATED_MILLION_BENCHMARK_2026-10-24.md.
