@@ -16,6 +16,8 @@ from world_address_engine.models import AddressRecord
 COUNTRY_RULES_VERSION = '2026-10-24.country.4'
 RIVAL_RATIO = 0.55
 MAX_ADDRESS_CHARS = 10_000
+CACHE_MAX_ENTRIES = 16_384
+CACHE_MAX_TEXT_BYTES = 16 * 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,6 +251,7 @@ class CountryClassifier:
             raise FileNotFoundError(self.geo_db)
         self.catalogue = catalogue
         self._cache = OrderedDict()
+        self._cache_text_bytes = 0
         self._db = None
         self._names = []
         for code, entry in catalogue.entries.items():
@@ -295,6 +298,7 @@ class CountryClassifier:
             self._db.close()
             self._db = None
         self._cache.clear()
+        self._cache_text_bytes = 0
 
     def classify(self, record: AddressRecord) -> CountryInference:
         if record.input_error:
@@ -302,13 +306,22 @@ class CountryClassifier:
         if len(record.address_text) + len(record.country_hint or '') > MAX_ADDRESS_CHARS:
             return CountryInference(record.record_no, None, 'UNRESOLVED', 'ADDRESS_TOO_LONG')
         key = (record.address_text, record.country_hint)
-        value = self._cache.get(key)
-        if value is None:
+        cached = self._cache.get(key)
+        if cached is None:
             value = self._infer(*key)
-            self._cache[key] = value
-            if len(self._cache) > 8192:
-                self._cache.popitem(last=False)
+            # Bound both entry count and retained text, including UTF-8 Han
+            # keys and country hints. Oversized keys still classify normally.
+            size = sum(len(part.encode('utf-8', errors='surrogatepass'))
+                       for part in key if part is not None)
+            if size <= CACHE_MAX_TEXT_BYTES:
+                self._cache[key] = (value, size)
+                self._cache_text_bytes += size
+                while (len(self._cache) > CACHE_MAX_ENTRIES or
+                       self._cache_text_bytes > CACHE_MAX_TEXT_BYTES):
+                    _evicted, (_result, weight) = self._cache.popitem(last=False)
+                    self._cache_text_bytes -= weight
         else:
+            value = cached[0]
             self._cache.move_to_end(key)
         return CountryInference(record.record_no, *value)
 
