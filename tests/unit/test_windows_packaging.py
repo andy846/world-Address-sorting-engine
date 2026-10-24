@@ -211,6 +211,82 @@ def test_bundle_rejects_missing_country_analysis_evidence(runtime_report):
     assert 'country_analysis' in entry.report_errors(report, expected_version=packaging.project_version())
 
 
+def test_bundle_proves_optional_regional_api_and_selected_gui_path(runtime_report):
+    assert runtime_report['hk_regional'] == {
+        'default_disabled': True, 'selected_path_used': True,
+        'same_address_positive': True, 'number_mismatch_negative': True,
+        'gui_complete': True, 'destination_counts': {'HK': 1},
+        'unresolved': 1, 'version_displayed': True,
+    }
+
+
+def test_self_test_global_fixtures_satisfy_real_pack_validation(monkeypatch):
+    from world_address_engine.jobs import country_analysis
+    original = country_analysis._pack_metadata
+    validated = set()
+
+    def validate(path, digest):
+        result = original(path, digest)
+        validated.add(path.name)
+        assert result['profile'] == 'EXTENDED_GLOBAL'
+        return result
+
+    monkeypatch.setattr(country_analysis, '_pack_metadata', validate)
+    result = entry.self_test()
+    assert result['ok'] is True
+    assert {'synthetic-geo.db', 'regional-global.db'} <= validated
+
+
+@pytest.mark.parametrize('field', ['default_disabled', 'selected_path_used',
+                                 'same_address_positive', 'number_mismatch_negative',
+                                 'gui_complete', 'destination_counts', 'unresolved',
+                                 'version_displayed', None])
+def test_bundle_rejects_missing_or_false_regional_evidence(runtime_report, field):
+    broken = dict(runtime_report)
+    if field is None:
+        broken.pop('hk_regional', None)
+    else:
+        broken['hk_regional'] = dict(runtime_report.get('hk_regional', {}))
+        broken['hk_regional'][field] = False
+    assert 'hk_regional' in entry.report_errors(broken, expected_version=packaging.project_version())
+
+
+def test_bundle_regional_smoke_does_not_import_build_only_dependencies(monkeypatch):
+    real_import = builtins.__import__
+
+    def runtime_only(name, *args, **kwargs):
+        if name.split('.')[0] in {'ijson', 'jsonschema'} or name.endswith('hk_als_builder'):
+            raise AssertionError('build-only dependency imported by runtime self-test')
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, '__import__', runtime_only)
+    result = entry.self_test()
+    assert result['ok'] is True
+    assert result['hk_regional']['selected_path_used'] is True
+
+
+@pytest.mark.parametrize('failure', ['no_match', 'always_match', 'disabled_gui'])
+def test_regional_smoke_fails_when_runtime_behavior_is_broken(monkeypatch, failure):
+    from world_address_engine.matching.hk_regional import HKRegionalMatcher, HKRegionalMatch
+    from world_address_engine.gui.country_app import CountryAnalysisWindow
+    if failure == 'no_match':
+        monkeypatch.setattr(HKRegionalMatcher, 'match', lambda *a: None)
+    elif failure == 'always_match':
+        monkeypatch.setattr(HKRegionalMatcher, 'match', lambda *a:
+                            HKRegionalMatch(('synthetic-address',), ('street', 'building_or_estate')))
+    else:
+        original = CountryAnalysisWindow.start_job
+
+        def disabled_gui(window):
+            window.hk_enabled.setChecked(False)
+            return original(window)
+
+        monkeypatch.setattr(CountryAnalysisWindow, 'start_job', disabled_gui)
+    result = entry.self_test()
+    assert result['ok'] is False
+    assert 'hk_regional' in result['assertion_failures']
+
+
 def test_bundle_proves_icon_progress_and_completed_pending_case_view(runtime_report):
     feedback = runtime_report['gui_feedback']
     assert feedback == {'icon_loaded': True, 'stage_events_observed': True,

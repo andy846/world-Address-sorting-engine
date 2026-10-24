@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "world-address-sorting-engine"
-version = "0.1.0"
+version = "0.2.0rc1"
 description = "Offline trilingual address-list country-code analysis"
 requires-python = ">=3.12"
 dependencies = ["opencc-python-reimplemented==0.1.7"]
@@ -17,6 +17,7 @@ world-address-engine-gui = "world_address_engine.gui.app:main"
 excel = ["openpyxl>=3.1,<4"]
 gui = ["PySide6>=6.8,<7"]
 packaging = ["pyinstaller>=6,<7"]
+data-build = ["ijson>=3.3,<4", "jsonschema>=4.23,<5"]
 test = ["pytest>=8,<10"]
 
 [tool.setuptools.packages.find]
