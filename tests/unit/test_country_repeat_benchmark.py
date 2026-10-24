@@ -44,6 +44,32 @@ def controls(tmp_path):
     return path
 
 
+def test_regional_benchmark_pins_selection_and_refuses_disabled_or_changed_pack(tmp_path):
+    from tests.unit.test_hk_regional_pack import fixture_pack
+    from world_address_engine.data.hk_regional import hk_pack_metadata
+    source, _, pack = seed(tmp_path)
+    regional, _ = fixture_pack(tmp_path / 'regional')
+    baseline = tmp_path / 'regional-baseline'
+    analyze_job(source, baseline, pack, hk_regional_db=regional)
+    module = tool()
+    work = tmp_path / 'private'
+    with pytest.raises(ValueError, match='regional'):
+        module.prepare_workload(source, baseline, controls(tmp_path), work, pack,
+                                repeats=2, control_rows=1)
+    info = module.prepare_workload(source, baseline, controls(tmp_path), work, pack,
+                                   repeats=2, control_rows=1, hk_regional_db=regional)
+    assert info['hk_regional'] == hk_pack_metadata(regional)
+    with pytest.raises(ValueError, match='regional'):
+        module.run_workload(work, pack)
+    result = module.run_workload(work, pack, hk_regional_db=regional, stop_after=3, batch_size=1)
+    assert result['run_status'] == 'CANCELLED'
+    assert result['hk_regional'] == info['hk_regional']
+    with regional.open('ab') as stream:
+        stream.write(b'changed')
+    with pytest.raises(ValueError, match='checksum|regional'):
+        module.run_workload(work, pack, hk_regional_db=regional, resume=True)
+
+
 def test_preparation_repeats_complete_blocks_and_preserves_original_fields(tmp_path):
     source, baseline, pack = seed(tmp_path)
     before = source.read_bytes()

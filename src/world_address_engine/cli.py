@@ -100,6 +100,8 @@ def main(argv: list[str] | None=None) -> int:
     analyze.add_argument('--output', type=Path, required=True)
     analyze.add_argument('--geo-db', type=Path, required=True)
     analyze.add_argument('--catalogue', type=Path)
+    analyze.add_argument('--hk-regional-db', type=Path,
+                         help='Optional installed Hong Kong bilingual pack; fills eligible unresolved results only')
     analyze.add_argument('--encoding', default='utf-8-sig')
     analyze.add_argument('--address-column', action='append', default=[])
     analyze.add_argument('--record-id-column')
@@ -140,7 +142,8 @@ def main(argv: list[str] | None=None) -> int:
                        'record_id_column': args.record_id_column, 'sheet_name': args.sheet,
                        'txt_mode': args.txt_mode, 'delimiter': args.delimiter}
             report = analyze_job(args.input, args.output, args.geo_db, options,
-                                 catalogue_path=args.catalogue, batch_size=args.batch_size,
+                                 catalogue_path=args.catalogue, hk_regional_db=args.hk_regional_db,
+                                 batch_size=args.batch_size,
                                  max_batches=args.max_batches, keep_checkpoint=args.keep_checkpoint)
         elif any((args.job_dir / name).is_dir()
                  for name in ('.country-state', '.country-finalize')) or (
