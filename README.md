@@ -5,7 +5,12 @@ one **Country Code** per address plus counts by code, using English, Traditional
 Chinese and Simplified Chinese input. Air/surface service, rates, Zone and
 Novsn codes are not part of this analysis.
 
-## Country Code analysis (alpha.2)
+## Country Code analysis (v0.1.0)
+
+The operator-accepted formal release is
+[v0.1.0 — Verified Country Code Analysis](https://github.com/andy846/world-Address-sorting-engine/releases/tag/v0.1.0).
+Download the Windows EXE and checksum file there; reference databases remain
+in the separate [k2 data release](https://github.com/andy846/world-Address-sorting-engine/releases/tag/geonames-packs-2026-10-22-k2).
 
 ```powershell
 python -m pip install -e ".[excel,gui]"
@@ -19,10 +24,10 @@ service-only `CNS` entry is excluded. These reference codes have their own
 namespace (for example Kosovo `XO`), so they are not blindly copied from ISO.
 The PDF parser is not required at runtime.
 
-The feature branch includes additional 2026-10-24 context fixes for HK district
-abbreviations, Jordan, building/street names and per-place evidence weights.
-These are not a replacement of the already published alpha.2 release. See
-`docs/COUNTRY_CONTEXT_FINETUNING_2026-10-24.md` for validation and limitations.
+This release includes the 2026-10-24 geographic-context fixes, source-order
+address selection, native workbench and persistent System/Light/Dark themes.
+Published alpha releases remain available unchanged. See
+[release scope and validation](docs/releases/v0.1.0.md).
 
 ```powershell
 world-address-engine analyze --input "sample.csv" --output "sample-country-analysis" --geo-db "packs/geonames-extended-global-2026-10-22-k2/pack.db"
@@ -40,12 +45,12 @@ shards. Interrupted runs may retain sensitive `.country-state` data for resume.
 The previous signed-HKP `classify` interface remains available for strict
 compatibility. Its production-approval gate is separate from country analysis.
 
-## Current development status (October 2026)
+## Current release status (October 2026)
 
-- Implemented developer-preview modules: typed contracts, signed HKP catalogue approval checks, real Compact/Extended GeoNames packs, trilingual retrieval, conservative classification, streaming CSV/TXT/XLSX input, reconciled exports, checkpoint/resume, and a PySide6 Windows GUI with audited manual review.
+- Formal v0.1.0 Country Code workflow: trilingual classification, streaming CSV/TXT/XLSX input, reconciled exports, cancellation/resume and a PySide6 workbench with read-only case inspection/export. Strict postal review remains separately available.
 - Both worldwide packs are preserved in [versioned data releases](docs/PACK_RELEASES_2026-10-23.md), verified and installable offline. Current k2 SQLite sizes are 142,577,664 bytes (Compact) and 1,087,344,640 bytes (Extended).
-- Windows onefile build and packaged self-test passed locally. The measured 100,000-row synthetic pipeline processed 109.7 records/sec with 56.8 MiB peak RSS; [measurement scope and provenance](docs/benchmarks.md) matter.
-- **Not production ready:** The official Hongkong Post destination master remains unverified; 1M/5M benchmarks and clean offline Windows operator acceptance are outstanding. The strict postal classifier is restricted to acknowledged test use; Country Code analysis is a separate estimation workflow. A Simplified Chinese Hong Kong SAR alias gap remains in k2's strict retrieval, not the new country alias rules.
+- Requested repeated-million workload completed in 152.847 seconds, with 69.871 MiB peak process working set; cancellation at 500,000 rows and fresh-process resume produced byte-identical reports. This workload has 9,606 distinct address/hint keys. [Measurements, review evidence and limits](docs/REPEATED_MILLION_BENCHMARK_2026-10-24.md).
+- Remaining country-analysis validation: labelled global accuracy, low-duplication/million-distinct and 5M workloads, million-row GUI interaction and clean disconnected Windows installation. The separate strict postal classifier retains its official-catalogue approval gate and existing strict-retrieval limitations.
 - Test examples use synthetic fixtures. No actual recipient address file is committed to this repository.
 
 ## Preview a production address file (no database needed)
@@ -100,17 +105,17 @@ Outputs are Classified_Addresses.csv, Manual_Review.csv, Country_Summary.csv and
 
 **Status:** Use synthetic fixtures until the official HKP master and documented acceptance gates pass. Independent classification and packaging reviews have been performed; they do not establish postal production accuracy.
 
-## Windows GUI developer preview
+## Windows GUI
 
 ```powershell
 python -m pip install -e ".[excel,gui]"
 world-address-engine-gui
 ```
 
-The GUI supports input mapping, pack selection, progress, cancellation/resume,
-and audited manual review. Protect local checkpoints and review logs. Packaged
-startup and synthetic previews have been tested; clean offline operator
-acceptance remains outstanding. See [alpha.1 release notes](docs/releases/v0.1.0-alpha.1.md).
+The Country Code GUI supports input mapping, pack selection, detailed progress,
+cancellation/resume, summaries, case inspection/export and saved appearance
+preferences. Protect local checkpoints and reports. See
+[v0.1.0 release notes](docs/releases/v0.1.0.md) for accepted tests and scope.
 
 
 ## Official worldwide GeoNames SQLite build

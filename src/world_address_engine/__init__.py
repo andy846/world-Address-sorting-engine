@@ -1,3 +1,3 @@
-"""Offline Hongkong Post postal destination classifier (under development)."""
+"""Offline country-code list analysis and strict postal compatibility."""
 
-__version__ = "0.1.0a2"
+__version__ = "0.1.0"
