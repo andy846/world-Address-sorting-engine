@@ -18,6 +18,7 @@ PAGE_SIZE = 100
 MODES = ('pending', 'inferred', 'all')
 EXPORT_HEADER = ('Source_Record_No', 'Address', 'Status', 'Country_Code', 'Reason', 'Candidates')
 REASONS = {
+    'HK_REGIONAL_ADDRESS_MATCH': 'Supporting address details match the offline Hong Kong address pack.',
     'EMPTY_ADDRESS': 'No address text was supplied.',
     'UNDECODABLE_TEXT': 'Some input text could not be decoded with the selected encoding.',
     'FORMULA_WITHOUT_CACHED_VALUE': 'An address formula has no saved value. Recalculate and save the workbook.',

@@ -9,6 +9,7 @@ from time import monotonic
 
 from world_address_engine.data.country_codes import load_country_codes
 from world_address_engine.data.pack_registry import require_readable_pack
+from world_address_engine.data.hk_regional import hk_pack_metadata, PROFILE as HK_PROFILE
 from world_address_engine.io.country_reports import _private_directory, write_country_reports
 from world_address_engine.io.delimited import _header_names, _record, iter_csv_records, iter_txt_records
 from world_address_engine.jobs.checkpoint import (
@@ -20,7 +21,7 @@ from world_address_engine.matching.country import (
 from world_address_engine.models import AddressRecord
 from world_address_engine.sqlite_util import open_db
 
-STATE_VERSION = '2026-10-23.country-state.1'
+STATE_VERSION = '2026-10-24.country-state.2'
 JOB_KIND = 'country-analysis'
 FINALIZATION_DIR = '.country-finalize'
 
@@ -130,16 +131,29 @@ def _preflight_input(path: Path, options: dict) -> None:
 
 
 def _pack_metadata(geo_db: Path, geo_digest: str) -> dict:
-    generation = require_readable_pack(geo_db)
     manifest_path = geo_db.with_name('manifest.json')
     manifest = json.loads(manifest_path.read_text(encoding='utf8')) if manifest_path.is_file() else {}
+    if manifest.get('profile') == HK_PROFILE:
+        raise ValueError('Choose a global GeoNames pack here; Hong Kong regional packs have a separate option.')
     with open_db(geo_db) as connection:
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if 'hk_pack_metadata' in tables:
+            raise ValueError('Choose a global GeoNames pack here; Hong Kong regional packs have a separate option.')
+        required_columns = {
+            'geo_places': set('place_id name country_code admin1_code admin2_code feature_class feature_code population'.split()),
+            'geo_aliases': {'place_id', 'alias', 'search_key', 'language'},
+        }
+        for name, columns in required_columns.items():
+            actual = {row[1] for row in connection.execute(f'PRAGMA table_info({name})')}
+            if name not in tables or not columns <= actual:
+                raise ValueError('The selected database is not a readable global GeoNames pack')
         table = connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='pack_metadata'").fetchone()
         row = connection.execute('SELECT profile FROM pack_metadata LIMIT 1').fetchone() if table else None
     profile = str(row[0]) if row else str(manifest.get('profile') or 'UNKNOWN')
     if manifest.get('profile') and manifest['profile'] != profile:
         raise ValueError('geo pack profile does not match its manifest')
+    generation = require_readable_pack(geo_db)
     return {'profile': profile, 'pack_format_version': generation,
             'geo_pack_version': str(manifest.get('pack_version') or 'sha256:' + geo_digest),
             'geo_manifest_sha256': file_sha256(manifest_path) if manifest_path.is_file() else None}
@@ -170,6 +184,16 @@ def _assert_sources_unchanged(cfg: dict, *, on_event=None) -> None:
     for key, value in _pack_metadata(Path(cfg['geo_db']), cfg['geo_sha256']).items():
         if cfg.get(key) != value:
             raise ValueError('geo pack version or profile changed since checkpoint')
+    regional = cfg.get('hk_regional')
+    if regional is not None:
+        if on_event is not None:
+            on_event({'stage': 'hashing_hk_pack', 'processed': 0, 'committed': 0})
+        try:
+            current = hk_pack_metadata(Path(regional['path']))
+        except (KeyError, OSError, ValueError) as exc:
+            raise ValueError('Hong Kong regional pack changed or is unavailable since checkpoint') from exc
+        if current != regional:
+            raise ValueError('Hong Kong regional pack changed since checkpoint')
     catalogue = load_country_codes(Path(cfg['catalogue_path']) if cfg['catalogue_path'] else None)
     if any(cfg.get(key) != value for key, value in _catalogue_metadata(catalogue).items()):
         raise ValueError('country catalogue changed since checkpoint')
@@ -280,7 +304,8 @@ def _process(output: Path, cfg: dict, *, max_batches=None, on_progress=None, on_
 
     try:
         check_cancel()
-        with CountryClassifier(Path(cfg['geo_db']), catalogue) as classifier:
+        regional_path = Path(cfg['hk_regional']['path']) if cfg.get('hk_regional') else None
+        with CountryClassifier(Path(cfg['geo_db']), catalogue, hk_regional_db=regional_path) as classifier:
             if classifier.rules_version != cfg['rules_version']:
                 raise ValueError('country classifier rules version changed')
             # Restore only after comparing each committed record and inference.
@@ -327,6 +352,7 @@ def _process(output: Path, cfg: dict, *, max_batches=None, on_progress=None, on_
                 'input_sha256', 'geo_sha256', 'geo_manifest_sha256', 'geo_pack_version',
                 'pack_format_version', 'profile', 'input_options_sha256', 'batch_size')}
             metadata['address_columns'] = cfg['input_options']['address_columns']
+            metadata['hk_regional'] = cfg.get('hk_regional')
 
             def before_manifest():
                 progress.emit('exporting', last_committed, last_committed,
@@ -370,7 +396,7 @@ def _process(output: Path, cfg: dict, *, max_batches=None, on_progress=None, on_
 
 
 def analyze_job(input_path, output_dir, geo_db, input_options: dict | None = None, *,
-                catalogue_path=None, batch_size=1000, max_batches=None,
+                catalogue_path=None, hk_regional_db=None, batch_size=1000, max_batches=None,
                 on_progress=None, on_event=None, cancel_requested=None, keep_checkpoint=False) -> dict:
     """Start an estimate with integer commit progress and optional count-only events.
 
@@ -395,10 +421,15 @@ def analyze_job(input_path, output_dir, geo_db, input_options: dict | None = Non
     input_digest = file_sha256(input_path)
     progress.emit('hashing_pack')
     geo_digest = file_sha256(geo_db)
+    regional = None
+    if hk_regional_db is not None:
+        progress.emit('hashing_hk_pack')
+        regional = hk_pack_metadata(Path(hk_regional_db))
     progress.emit('loading')
     catalogue_path = Path(catalogue_path).resolve() if catalogue_path is not None else None
     catalogue = load_country_codes(catalogue_path)
     cfg = {'job_kind': JOB_KIND, 'schema_version': STATE_VERSION,
+           'hk_regional': regional,
            'rules_version': COUNTRY_RULES_VERSION, 'batch_size': batch_size,
            'input_path': str(input_path), 'geo_db': str(geo_db),
            'catalogue_path': str(catalogue_path) if catalogue_path is not None else None,

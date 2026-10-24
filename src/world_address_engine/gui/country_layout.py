@@ -1,7 +1,7 @@
 """Build the native workbench while leaving job/controller logic in country_app."""
 from PySide6.QtCore import QEvent, QSize, Qt
 from PySide6.QtWidgets import (
-    QAbstractItemView, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
+    QAbstractItemView, QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
     QLayout, QLineEdit, QListWidget, QPushButton, QProgressBar, QScrollArea, QSizePolicy, QSplitter,
     QTextEdit, QVBoxLayout, QWidget,
 )
@@ -143,7 +143,7 @@ class WorkbenchHeader(QWidget):
         super().resizeEvent(event)
 
 
-def build_workbench(w, discover_pack):
+def build_workbench(w, discover_pack, discover_hk_pack):
     root = QWidget()
     root.setObjectName('workbenchRoot')
     outer = QVBoxLayout(root)
@@ -266,6 +266,19 @@ def build_workbench(w, discover_pack):
     w.geo_db.setToolTip(w.geo_db.text())
     w.geo_db.textChanged.connect(w.geo_db.setToolTip)
     field('GeoNames pack', w.geo_db, w._choose_geo_db, 'Choose offline GeoNames pack')
+    w.hk_enabled = QCheckBox('Enable Hong Kong address pack')
+    w.hk_enabled.setAccessibleName('Enable optional Hong Kong address pack')
+    w.hk_enabled.setToolTip('Optional offline bilingual lookup for unresolved addresses. Disabled by default.')
+    w.hk_enabled.installEventFilter(w.settings_scroll)
+    settings.addWidget(w.hk_enabled)
+    w.hk_regional_db = QLineEdit(discover_hk_pack())
+    w.hk_regional_db.setPlaceholderText('Optional installed ALS SQLite pack')
+    w.hk_regional_db.setToolTip(w.hk_regional_db.text())
+    w.hk_regional_db.textChanged.connect(w.hk_regional_db.setToolTip)
+    field('Hong Kong pack (optional)', w.hk_regional_db, w._choose_hk_db,
+          'Choose offline Hong Kong regional pack')
+    settings.addWidget(_label('Enable to use this pack for unresolved addresses. '
+                              'Resume uses the original saved pack. No online queries.', role='muted'))
     settings.addWidget(_label('Country catalogue is included automatically.', role='muted'))
     settings.addStretch(1)
     w.settings_scroll.setWidget(w.inputs)

@@ -21,6 +21,7 @@ STAGE_NAMES = {
     'validating': 'Checking input, address mapping and output settings',
     'hashing_input': 'Verifying the input file fingerprint',
     'hashing_pack': 'Verifying the offline reference database fingerprint',
+    'hashing_hk_pack': 'Verifying the Hong Kong regional database fingerprint',
     'loading': 'Loading the country catalogue and offline reference database',
     'restoring': 'Verifying saved checkpoint records for resume',
     'classifying': 'Analyzing addresses and assigning country codes',
@@ -43,6 +44,15 @@ def _discover_geo_pack() -> str:
             db = folder / 'pack.db'
             if db.is_file():
                 return str(db)
+    return ''
+
+
+def _discover_hk_pack() -> str:
+    """Suggest an installed regional pack without validating or enabling it."""
+    for folder in sorted((Path.cwd() / 'packs').glob('hk-bilingual-als-*'), reverse=True):
+        db = folder / 'pack.db'
+        if db.is_file():
+            return str(db)
     return ''
 
 
@@ -115,6 +125,29 @@ def _read_country_export(output_dir: Path, report: dict, cancel_requested=None) 
     return payload
 
 
+def _read_partial_country_result(output_dir: Path, report: dict) -> dict:
+    """Read saved source labels on the worker; never hash or infer UI choices.
+
+    PAUSED/CANCELLED API results omit export metadata. A missing/unreadable
+    checkpoint must remain unknown, rather than falsely claiming HK disabled.
+    """
+    merged = dict(report)
+    metadata = dict(report.get('run_metadata') or {})
+    if ('hk_regional' not in metadata
+            and report.get('state', report.get('run_status')) in ('PAUSED', 'CANCELLED')):
+        try:
+            saved = json.loads((output_dir / '.country-state' / 'config.json').read_text(encoding='utf-8'))
+            if isinstance(saved, dict) and saved.get('job_kind') == 'country-analysis':
+                for key in ('catalogue_version', 'geo_pack_version', 'geo_pack_versions',
+                            'rules_version', 'hk_regional'):
+                    if key in saved:
+                        metadata[key] = saved[key]
+        except (OSError, ValueError):
+            pass  # Preserve resumable state; the display explicitly says unavailable.
+    merged['run_metadata'] = metadata
+    return {'report': merged, 'rows': []}
+
+
 class CountryAnalysisWindow(QMainWindow):
     """Import, preview, analyze, and resume country counts without postal approval."""
 
@@ -153,7 +186,7 @@ class CountryAnalysisWindow(QMainWindow):
 
     def _build(self) -> None:
         from world_address_engine.gui.country_layout import build_workbench
-        build_workbench(self, _discover_geo_pack)
+        build_workbench(self, _discover_geo_pack, _discover_hk_pack)
 
     def changeEvent(self, event):
         super().changeEvent(event)
@@ -213,6 +246,13 @@ class CountryAnalysisWindow(QMainWindow):
             self, 'Choose an installed GeoNames pack', '', 'SQLite packs (*.db *.sqlite)')
         if path:
             self.geo_db.setText(path)
+
+    def _choose_hk_db(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, 'Choose an installed Hong Kong regional pack', '', 'SQLite packs (*.db *.sqlite)')
+        if path:
+            self.hk_regional_db.setText(path)
+            self.hk_enabled.setChecked(True)
 
     def _input_options(self) -> dict:
         return {'encoding': self.encoding.currentText(),
@@ -454,16 +494,24 @@ class CountryAnalysisWindow(QMainWindow):
             return
         geo_db = Path(geo_text)
         cancel = self._cancel
+        hk_enabled = self.hk_enabled.isChecked()
+        hk_path = self.hk_regional_db.text().strip()
 
         def work(emit, emit_event):
             from world_address_engine.jobs.country_analysis import analyze_job
+            regional_options = {}
+            if hk_enabled:
+                if not hk_path:
+                    raise ValueError('Choose a Hong Kong regional pack or disable the optional pack.')
+                regional_options['hk_regional_db'] = Path(hk_path)
             if not options['sheet_name'] and source.suffix.lower() == '.xlsx':
                 _, options['sheet_name'] = _input_header(source, options['encoding'], None)
             result = analyze_job(source, output, geo_db, options,
-                                 on_progress=emit, on_event=emit_event, cancel_requested=cancel.is_set)
+                                 on_progress=emit, on_event=emit_event, cancel_requested=cancel.is_set,
+                                 **regional_options)
             if result.get('state', result.get('run_status')) == 'COMPLETE':
                 return _read_country_export(output, result, cancel.is_set)
-            return {'report': result, 'rows': []}
+            return _read_partial_country_result(output, result)
 
         self._begin_analysis(output, work)
 
@@ -482,7 +530,7 @@ class CountryAnalysisWindow(QMainWindow):
             result = resume_analysis(output, on_progress=emit, on_event=emit_event, cancel_requested=cancel.is_set)
             if result.get('state', result.get('run_status')) == 'COMPLETE':
                 return _read_country_export(output, result, cancel.is_set)
-            return {'report': result, 'rows': []}
+            return _read_partial_country_result(output, result)
 
         self._begin_analysis(output, work)
 
@@ -525,10 +573,14 @@ class CountryAnalysisWindow(QMainWindow):
             for column, value in enumerate(row):
                 self.counts.setItem(index, column, QTableWidgetItem(str(value)))
         meta = report.get('run_metadata', {})
+        regional = meta.get('hk_regional')
+        regional_version = ('disabled' if regional is None and 'hk_regional' in meta
+                            else regional.get('version', 'unavailable')
+                            if isinstance(regional, dict) else 'unavailable')
         self.source_versions.setText(
             f"Catalogue: {meta.get('catalogue_version', '')} | "
             f"GeoNames: {meta.get('geo_pack_version', meta.get('geo_pack_versions', ''))} | "
-            f"Rules: {meta.get('rules_version', '')}")
+            f"Rules: {meta.get('rules_version', '')} | Hong Kong: {regional_version}")
         self.open_output_button.setEnabled(state == 'COMPLETE')
         elapsed = max(0.0, monotonic() - self._analysis_started) if self._analysis_started else 0.0
         if state == 'COMPLETE':

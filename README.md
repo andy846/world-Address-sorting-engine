@@ -45,6 +45,23 @@ shards. Interrupted runs may retain sensitive `.country-state` data for resume.
 The previous signed-HKP `classify` interface remains available for strict
 compatibility. Its production-approval gate is separate from country analysis.
 
+## Development candidate: optional Hong Kong regional pack
+
+The `codex/hk-bilingual-regional` branch develops v0.2.0rc1. It adds an optional,
+independent ALS bilingual data pack for eligible unresolved estimates, with
+offline installation, pinned recovery and GUI controls. The option is disabled
+by default. Existing assigned results and explicit conflicts remain protected.
+See [usage and rebuild instructions](docs/HK_REGIONAL_PACK.md).
+
+The official snapshot's strict audit found 9,508 invalid features among 183,964.
+No final HK database or data release has been produced; a partial-coverage
+source policy requires an explicit decision. See the
+[source audit](docs/HK_ALS_SOURCE_AUDIT_2026-10-24.md) and
+[implementation ledger](docs/superpowers/plans/2026-10-24-hk-bilingual-regional.md).
+Local regression, frozen candidate and disabled-million measurements are in the
+[candidate validation receipt](docs/HK_REGIONAL_VALIDATION_2026-10-24.md).
+The published v0.1.0 remains the formal release.
+
 ## Current release status (October 2026)
 
 - Formal v0.1.0 Country Code workflow: trilingual classification, streaming CSV/TXT/XLSX input, reconciled exports, cancellation/resume and a PySide6 workbench with read-only case inspection/export. Strict postal review remains separately available.
@@ -79,7 +96,7 @@ The current sample file uses `NAME_ADDRESS_LINE1` ... `NAME_ADDRESS_LINE5` and `
 ## Dev tests
 
 ```bash
-python -m pip install -e ".[excel,test]"
+python -m pip install -e ".[excel,test,data-build]"
 python -m pytest -q
 ```
 
