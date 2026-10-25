@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "verified_date": "2026-10-24",
+  "scope": "Public institution locations and geographic country labels; not postal deliverability certification.",
+  "controls": [
+    {
+      "control_id": "british-museum",
+      "lines": ["The British Museum", "Great Russell Street", "London WC1B 3DG", "United Kingdom"],
+      "expected_code": "GB",
+      "source_url": "https://www.britishmuseum.org/visit"
+    },
+    {
+      "control_id": "national-gallery-singapore",
+      "lines": ["National Gallery Singapore", "1 St Andrew’s Road", "Singapore 178957"],
+      "expected_code": "SG",
+      "source_url": "https://www.nationalgallery.sg/sg/en/visit.html"
+    },
+    {
+      "control_id": "te-papa",
+      "lines": ["Museum of New Zealand Te Papa Tongarewa", "55 Cable Street", "Wellington 6011", "New Zealand"],
+      "expected_code": "NZ",
+      "source_url": "https://www.tepapa.govt.nz/visit/plan-your-visit/getting-here"
+    },
+    {
+      "control_id": "sydney-opera-house",
+      "lines": ["Sydney Opera House", "Bennelong Point", "Sydney NSW 2000", "Australia"],
+      "expected_code": "AU",
+      "source_url": "https://www.sydneyoperahouse.com/visit/eat-drink/bennelong"
+    }
+  ]
+}

@@ -47,6 +47,8 @@ class DestinationCandidate:
     # The classifier needs the breakdown to withdraw evidence that turns out
     # to belong to a company name rather than to a destination.
     term_support: tuple[tuple[str, float], ...] = ()
+    # Complete bounded contributions, independent of truncated display evidence.
+    place_support: tuple[tuple[str, float, int], ...] = ()
 
     def __post_init__(self) -> None:
         if not self.destination_id or not 0 <= self.score <= 1:

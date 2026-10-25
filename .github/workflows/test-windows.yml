@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - feat/hkp-trilingual-phase1
+      - codex/hk-bilingual-regional
   pull_request:
     branches:
       - main
@@ -29,7 +30,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install development/test dependencies
-        run: python -m pip install -e ".[excel,gui,packaging,test]"
+        run: python -m pip install -e ".[excel,gui,packaging,test,data-build]"
 
       # POSIX allows renaming or deleting a file that is still open, so a
       # leaked SQLite handle is invisible on the Linux runners used by the
