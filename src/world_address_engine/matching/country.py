@@ -13,7 +13,7 @@ from world_address_engine.matching.retrieve import retrieve_candidates, Occurren
 from world_address_engine.data.geonames_builder import normalize_search_key
 from world_address_engine.models import AddressRecord
 
-COUNTRY_RULES_VERSION = '2026-10-25.country.6'
+COUNTRY_RULES_VERSION = '2026-10-25.country.7'
 RIVAL_RATIO = 0.55
 MAX_ADDRESS_CHARS = 10_000
 CACHE_MAX_ENTRIES = 16_384
@@ -122,6 +122,10 @@ _STREET_AFTER = re.compile(r'^\s*(?:street|st|road|rd|avenue|ave|lane|ln|drive|d
 _STREET_TERM = re.compile(r'\b(?:street|st|road|rd|avenue|ave|lane|ln|drive|dr|boulevard|blvd)$|[街路巷弄]$', re.I)
 _STREET_ADDRESS = re.compile(
     r'^\s*\d+[a-z]?\s+.+\b(?:street|st|road|rd|avenue|ave|lane|ln|drive|dr|boulevard|blvd)\b', re.I)
+_NUMBERED_STREET = re.compile(
+    r'(?<![a-z0-9])[0-9]+[a-z]?(?:\s*[-/]\s*[0-9]+[a-z]?)?\s+'
+    r"(?:[a-z\u00c0-\u024f\u1e00-\u1eff][a-z\u00c0-\u024f\u1e00-\u1eff'’.-]*\s+){1,12}?"
+    r'(?:street|st|road|rd|avenue|ave|lane|ln|drive|dr|boulevard|blvd)\b', re.I)
 _BUILDING_AFTER = re.compile(
     r'^\s*(?:centre|center|building|tower|plaza|house|bank|university|hospital|industrial\s+park)\b'
     r'|^\s*(?:中心|大廈|大厦|大樓|大楼|廣場|广场|銀行|银行|大學|大学|橋|桥)'
@@ -610,7 +614,13 @@ class CountryClassifier:
             for place_id, country, feature, population in rows:
                 if feature in {'PCLI', 'PCLX', 'PCLS', 'PCLD', 'ADM1', 'ADM2', 'PPLC', 'PPLA'} or (population or 0) >= 100_000:
                     qualified[place_id] = country
-        forms = tuple(form for line in scope.splitlines() for form in normalize_address(line))
+        # Bound street recognition at fragment boundaries, but retain full
+        # line normalization for geographic aliases such as Washington, D.C.
+        # A marker stops words across a removed street forming a new city name.
+        forms = tuple(form for line in scope.splitlines()
+                      for form in normalize_address(''.join(
+                          _NUMBERED_STREET.sub(' | ', fragment)
+                          for fragment in re.split(r'([,;，；])', line))))
         roles = {}
         for candidate in candidates:
             for term, _weight, _place_id in candidate.place_support:
