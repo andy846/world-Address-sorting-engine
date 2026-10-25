@@ -13,11 +13,11 @@ tested release-preparation tree before tagging. Preserve branch/history and
 all older release assets. New v0.2.0 is non-prerelease and explicitly Latest.
 
 - [x] Release identity RED (rc1 versus formal), GREEN scoped metadata/packaging.
-- [ ] Independent release-scope review, business-source equivalence, full suite.
-- [ ] Fresh formal EXE/wheel, actual offline self-test and installed-wheel check.
-- [ ] Integrate existing PRs and validate exact main release tree/CI.
-- [ ] Immutable v0.2.0 tag and verified public-only assets; sole Latest entry.
-- [ ] Canonical local EXE/receipt, final public/local hashes and handoff.
+- [x] Independent release-scope review, business-source equivalence, full suite.
+- [x] Fresh formal EXE/wheel, actual offline self-test and installed-wheel check.
+- [x] Integrate existing PRs and validate exact main release tree/CI.
+- [x] Immutable v0.2.0 tag and verified public-only assets; sole Latest entry.
+- [x] Canonical local EXE/receipt, final public/local hashes and handoff.
 
 Canonical local deployment: D:\WASE\WorldAddressEngine.exe. Older out folders
 are history, not additional active deployments. The optional HK data pack remains
@@ -28,3 +28,20 @@ Private input, row output, checkpoint and benchmark oracle files stay ignored.
 Release identity TDD: one metadata test failed as expected, then the changed
 version + existing packaging guards passed (112 passed, 1 optional actual-build
 test skipped in 30.24s). The actual formal build must also pass separately.
+
+Completed: independent review found no important issues; accepted business
+source unchanged except version string. Formal local full suite: 1,738 passed,
+1 skipped, 2 existing xfails / 328.55s. Actual formal EXE self-test passed,
+fresh isolated local wheel core installation passed, full-dependency wheel
+installation passed in Linux CI. All preparation CI jobs passed.
+
+PR #3 merged at 42c113d; PR #2 merged into main at 846cfaf. Complete merged
+tree equals tested preparation ee11701. Main CI 40165445500 and Windows
+40165445535 passed before tagging/publication. Annotated tag v0.2.0 points
+to 846cfaf2dbc9135a3cfecbaff6afe76036df74fa.
+
+Published release ID 423167195 is non-draft/non-prerelease and Latest.
+All four remote artifact hashes/sizes match; all v0.1.0 original artifacts
+remain unchanged. Canonical local EXE/receipt deployed and verified. Further
+changes are documentation-only receipts; accepted business behavior is frozen.
+Detailed durable receipt: docs/releases/v0.2.0-validation.md.

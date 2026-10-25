@@ -1,5 +1,9 @@
 # Compound street country-evidence correction — 25 October 2026
 
+Historical bugfix receipt. The operator subsequently accepted manual testing;
+[v0.2.0 formal deployment](releases/v0.2.0-validation.md) now freezes this
+business behavior with the formal version identity.
+
 Runtime commit `a99d94e`, country rules `2026-10-25.country.7`. This corrects
 the two public errors documented against fc19ef6; the published TEST data pack,
 original source, SQLite databases, v0.1.0 Latest and main remain unchanged.
