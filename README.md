@@ -5,10 +5,11 @@ one **Country Code** per address plus counts by code, using English, Traditional
 Chinese and Simplified Chinese input. Air/surface service, rates, Zone and
 Novsn codes are not part of this analysis.
 
-## Country Code analysis (v0.1.0)
+## Country Code analysis (v0.2.0)
 
-The operator-accepted formal release is
-[v0.1.0 — Verified Country Code Analysis](https://github.com/andy846/world-Address-sorting-engine/releases/tag/v0.1.0).
+The sole current operator-accepted formal release is
+[v0.2.0 — Verified Country Code Analysis](https://github.com/andy846/world-Address-sorting-engine/releases/tag/v0.2.0),
+accepted by manual testing on 25 October 2026 and designated GitHub Latest.
 Download the Windows EXE and checksum file there; reference databases remain
 in the separate [k2 data release](https://github.com/andy846/world-Address-sorting-engine/releases/tag/geonames-packs-2026-10-22-k2).
 
@@ -24,10 +25,12 @@ service-only `CNS` entry is excluded. These reference codes have their own
 namespace (for example Kosovo `XO`), so they are not blindly copied from ISO.
 The PDF parser is not required at runtime.
 
-This release includes the 2026-10-24 geographic-context fixes, source-order
-address selection, native workbench and persistent System/Light/Dark themes.
-Published alpha releases remain available unchanged. See
-[release scope and validation](docs/releases/v0.1.0.md).
+This release includes country rules7, the compound-street evidence correction,
+optional offline Hong Kong bilingual address evidence, source-order address
+selection, native workbench and persistent System/Light/Dark themes.
+Older versions remain historical downloads. See
+[release scope and validation](docs/releases/v0.2.0.md) and
+[the current release policy](docs/RELEASE_POLICY.md).
 
 ```powershell
 world-address-engine analyze --input "sample.csv" --output "sample-country-analysis" --geo-db "packs/geonames-extended-global-2026-10-22-k2/pack.db"
@@ -45,9 +48,9 @@ shards. Interrupted runs may retain sensitive `.country-state` data for resume.
 The previous signed-HKP `classify` interface remains available for strict
 compatibility. Its production-approval gate is separate from country analysis.
 
-## Development candidate: optional Hong Kong regional pack
+## Optional Hong Kong regional pack
 
-The `codex/hk-bilingual-regional` branch develops v0.2.0rc1. It adds an optional,
+v0.2.0 includes an optional,
 independent ALS bilingual data pack for eligible unresolved estimates, with
 offline installation, pinned recovery and GUI controls. The option is disabled
 by default. Existing assigned results and explicit conflicts remain protected.
@@ -56,7 +59,8 @@ See [usage and rebuild instructions](docs/HK_REGIONAL_PACK.md).
 The official snapshot's strict audit found 9,508 invalid features among 183,964.
 The operator approved quarantining those features, retaining the unmodified
 source/schema and building a partial-source TEST pack with 173,215 addresses.
-This remains separate from formal application release. See the
+The reference pack retains its partial-source TEST designation independently
+of the operator-accepted application release. See the
 [source audit](docs/HK_ALS_SOURCE_AUDIT_2026-10-24.md) and
 [continuation ledger](docs/superpowers/plans/2026-10-25-hk-partial-source.md).
 Current regression, public controls, private replay and performance receipts are
@@ -65,13 +69,14 @@ Country rules7 correct the two documented compound-street country errors;
 the unchanged 336-case smoke bank now passes. See the
 [correction and regression report](docs/COMPOUND_STREET_FIX_2026-10-25.md).
 This selected smoke bank does not establish global accuracy or readiness.
-The published v0.1.0 remains the formal release.
+v0.2.0 is the only currently supported formal application release; earlier
+versions are retained as history.
 
 ## Current release status (October 2026)
 
-- Formal v0.1.0 Country Code workflow: trilingual classification, streaming CSV/TXT/XLSX input, reconciled exports, cancellation/resume and a PySide6 workbench with read-only case inspection/export. Strict postal review remains separately available.
+- Formal v0.2.0 Country Code workflow: trilingual classification, streaming CSV/TXT/XLSX input, reconciled exports, cancellation/resume, optional verified HK evidence and a PySide6 workbench with read-only case inspection/export. Strict postal review remains separately available.
 - Both worldwide packs are preserved in [versioned data releases](docs/PACK_RELEASES_2026-10-23.md), verified and installable offline. Current k2 SQLite sizes are 142,577,664 bytes (Compact) and 1,087,344,640 bytes (Extended).
-- Requested repeated-million workload completed in 152.847 seconds, with 69.871 MiB peak process working set; cancellation at 500,000 rows and fresh-process resume produced byte-identical reports. This workload has 9,606 distinct address/hint keys. [Measurements, review evidence and limits](docs/REPEATED_MILLION_BENCHMARK_2026-10-24.md).
+- Historical country-rules6 repeated-million measurements: 183.661 seconds with the real HK pack, 149.293 seconds disabled; cancel at 500,000 and fresh-process resume passed exhaustive verification. The workload has 9,606 distinct keys. These are not relabelled as rules7/v0.2.0 throughput measurements. [Exact runtime receipts and limits](docs/HK_REGIONAL_VALIDATION_2026-10-25.md).
 - Remaining country-analysis validation: labelled global accuracy, low-duplication/million-distinct and 5M workloads, million-row GUI interaction and clean disconnected Windows installation. The separate strict postal classifier retains its official-catalogue approval gate and existing strict-retrieval limitations.
 - Test examples use synthetic fixtures. No actual recipient address file is committed to this repository.
 

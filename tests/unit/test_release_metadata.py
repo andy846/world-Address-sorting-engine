@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 def test_package_versions_match():
     project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text("utf-8"))
-    assert project["project"]["version"] == __version__ == "0.2.0rc1"
+    assert project["project"]["version"] == __version__ == "0.2.0"
 
 
 def test_stable_country_release_documents_verified_scope_and_remaining_gates():

@@ -2,7 +2,7 @@ name: Country Code analysis release validation
 
 on:
   push:
-    branches: [feat/country-code-analysis, codex/hk-bilingual-regional]
+    branches: [main, feat/country-code-analysis, codex/hk-bilingual-regional]
   workflow_dispatch:
 
 permissions:
@@ -73,7 +73,7 @@ jobs:
           from world_address_engine.data.country_codes import load_country_codes
           from world_address_engine.matching.normalize import _converter
           profile = load_country_codes()
-          assert world_address_engine.__version__ == '0.2.0rc1'
+          assert world_address_engine.__version__ == '0.2.0'
           assert len(profile.entries) == 235 and 'CNS' not in profile.entries
           assert profile.geo_to_code['XK'] == 'XO'
           assert _converter('t2s') is not None

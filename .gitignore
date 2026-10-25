@@ -31,6 +31,10 @@ packs/
 test-output/
 out/
 
+# Single local deployment entry and generated release receipt (not source).
+/WorldAddressEngine.exe
+/CURRENT_RELEASE.json
+
 # Export files hold the same plaintext recipient data as the checkpoints.
 Classified_Addresses*.csv
 Manual_Review.csv
