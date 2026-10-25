@@ -40,6 +40,8 @@ Run `world-address-engine analyze --help` for the supported input mapping
 options. Completed reports record the actual regional version and both file
 hashes. Resume uses the original selection; replacing or removing either
 regional file prevents resume. Finish old v0.1.0 checkpoints with v0.1.0.
+Country rules6 checkpoints likewise require their matching rules6 build;
+the rules7 street-evidence correction applies only to new analyses.
 
 ## Evidence and limits
 

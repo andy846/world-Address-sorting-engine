@@ -1,5 +1,10 @@
 # Hong Kong partial-source test pack — 25 October 2026
 
+Historical receipt for fc19ef6 / country rules6. The two label errors below
+were subsequently fixed in country rules7; see the separate
+[correction report](COMPOUND_STREET_FIX_2026-10-25.md). The runtime, benchmark
+measurements and publication identity in this receipt are not rewritten.
+
 Application runtime: `fc19ef6`, candidate `0.2.0rc1`, country rules
 `2026-10-25.country.6`. The existing `v0.1.0` formal release and GitHub Latest
 remain unchanged. This report concerns an optional, separate TEST data pack.

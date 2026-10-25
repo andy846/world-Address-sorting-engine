@@ -61,7 +61,10 @@ This remains separate from formal application release. See the
 [continuation ledger](docs/superpowers/plans/2026-10-25-hk-partial-source.md).
 Current regression, public controls, private replay and performance receipts are
 in the [25 October validation report](docs/HK_REGIONAL_VALIDATION_2026-10-25.md).
-Two pre-existing public country errors remain; all-label QA has not passed.
+Country rules7 correct the two documented compound-street country errors;
+the unchanged 336-case smoke bank now passes. See the
+[correction and regression report](docs/COMPOUND_STREET_FIX_2026-10-25.md).
+This selected smoke bank does not establish global accuracy or readiness.
 The published v0.1.0 remains the formal release.
 
 ## Current release status (October 2026)
