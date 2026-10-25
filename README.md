@@ -54,12 +54,14 @@ by default. Existing assigned results and explicit conflicts remain protected.
 See [usage and rebuild instructions](docs/HK_REGIONAL_PACK.md).
 
 The official snapshot's strict audit found 9,508 invalid features among 183,964.
-No final HK database or data release has been produced; a partial-coverage
-source policy requires an explicit decision. See the
+The operator approved quarantining those features, retaining the unmodified
+source/schema and building a partial-source TEST pack with 173,215 addresses.
+This remains separate from formal application release. See the
 [source audit](docs/HK_ALS_SOURCE_AUDIT_2026-10-24.md) and
-[implementation ledger](docs/superpowers/plans/2026-10-24-hk-bilingual-regional.md).
-Local regression, frozen candidate and disabled-million measurements are in the
-[candidate validation receipt](docs/HK_REGIONAL_VALIDATION_2026-10-24.md).
+[continuation ledger](docs/superpowers/plans/2026-10-25-hk-partial-source.md).
+Current regression, public controls, private replay and performance receipts are
+in the [25 October validation report](docs/HK_REGIONAL_VALIDATION_2026-10-25.md).
+Two pre-existing public country errors remain; all-label QA has not passed.
 The published v0.1.0 remains the formal release.
 
 ## Current release status (October 2026)

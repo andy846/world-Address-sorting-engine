@@ -1,5 +1,9 @@
 # Hong Kong regional candidate validation — 24 October 2026
 
+Historical receipt. The operator approved partial-source quarantine on
+25 October; see [the continuation validation](HK_REGIONAL_VALIDATION_2026-10-25.md)
+for real-pack results. The failed strict audit below is not rewritten.
+
 This receipt covers code and the **regional-disabled** repeated workload.
 The official real HK pack gate is blocked; no regional-enabled real-data or
 million-row result is claimed. v0.1.0 remains GitHub Latest.

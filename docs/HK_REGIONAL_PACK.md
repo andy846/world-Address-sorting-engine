@@ -11,6 +11,11 @@ Extract the data-pack ZIP to a new folder. Keep `pack.db`, `manifest.json`,
 `audit.json` and `ATTRIBUTION.txt` together. Never replace files inside a pack
 that an analysis is using.
 
+A partial-source pack also requires `quarantine.jsonl`. Keep it with the other
+files: its checksum and complete excluded-record count are verified during
+installation and analysis. The GUI identifies partial source coverage and
+shows how many official source features were excluded.
+
 From a source checkout, verify and install it with:
 
 ```powershell
@@ -45,7 +50,9 @@ retained. Translations are alternative spellings, not extra votes.
 A match requires a building/estate plus street, or a street plus house number
 plus district, on the same official address record. Supplied contradictory
 house numbers reject the match. Recipient and company lines cannot supply
-the missing address evidence. Candidate queries are bounded and indexed.
+the missing address evidence. A complete official building/estate name with a
+typed building ending can remain eligible even when it contains company words;
+recipient prefixes are still excluded. Candidate queries are bounded and indexed.
 
 Only `NO_GEOGRAPHIC_MATCH` and `MULTIPLE_PLAUSIBLE_COUNTRIES` can be upgraded.
 A successful fallback is `INFERRED`, country code `HK`, reason
@@ -59,6 +66,20 @@ Build dependencies are optional and are not required by the GUI or EXE:
 python -m pip install -e ".[data-build]"
 python tools/build_hk_als_pack.py ALS-GeoJSON.zip als-geojson.schema.json new-output --source-date 2026-10-23 --pack-version 2026-10-23-r1
 ```
+
+The default command remains strict and refuses any invalid feature. On
+25 October 2026 the operator approved a partial-coverage **test pack** using
+only schema-valid features from the preserved snapshot:
+
+```powershell
+python tools/build_hk_als_pack.py ALS-GeoJSON.zip als-geojson.schema.json new-partial-output --source-date 2026-10-23 --pack-version 2026-10-23-r1-partial --quarantine-invalid
+```
+
+This explicit mode records every excluded feature's member, one-based index
+and reason in a hashed receipt. It does not repair invalid features or weaken
+the official schema. Broken JSON/envelopes, CRC failures, source mutation and
+zero valid records still prevent publication. `complete` in source-validation
+metadata refers to this snapshot's accepted features, not geographic coverage.
 
 Sources: [official ALS download](https://www.als.gov.hk/data/ALS-GeoJSON.zip),
 [official schema](https://www.als.gov.hk/docs/als-geojson.schema.json).

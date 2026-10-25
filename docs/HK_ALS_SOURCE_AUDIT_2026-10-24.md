@@ -1,6 +1,8 @@
 # ALS source audit — 24 October 2026
 
-Status: **strict source gate failed; no final regional database produced**.
+Historical status on 24 October: **strict source gate failed**.
+On 25 October, an explicitly approved partial-source test database was built
+from the valid features; the original strict failure remains recorded below.
 The existing v0.1.0 release is unaffected.
 
 ## Preserved official snapshot
@@ -76,8 +78,19 @@ aggregate audit evidence and removes unpublished database files. The detailed
 local receipt is `builds/hk-als-2026-10-23/pack-candidate-audited/audit.json`.
 The original source and official schema have not been rewritten.
 
-A user decision has been requested on a narrowly scoped alternative: quarantine
-all invalid features and build an explicitly partial-coverage test pack from
-the valid features. That policy has **not** been applied. A data release, actual
-regional-enabled private replay and real-pack performance/recovery gates remain
-blocked until an acceptable source policy or corrected source is available.
+On 25 October 2026 the user explicitly approved the narrowly scoped alternative:
+quarantine all invalid features and build an explicitly partial-coverage test
+pack from the valid features. The strict audit above remains a failed historical
+receipt, not rewritten as passing. The default builder remains strict; the new
+policy requires an explicit flag. Its implementation and real-build results are
+recorded in `superpowers/plans/2026-10-25-hk-partial-source.md`.
+
+The partial build reconciles 174,456 accepted features, 1,241 exact projected
+duplicates, 173,215 addresses, 150,092 buildings and 1,258,249 aliases. Its
+747,376,640-byte SQLite database has SHA256
+`bd5edd2eaacbfe9459df27d7c338899c29bdaa828c76bb13573799077a926ac8`.
+The 9,508-entry quarantine receipt has SHA256
+`89a5ed2e9b21587b1048c3008584f61044dadeb5aa98ad017a680bef1c35858c`.
+Full offline installation verified integrity, foreign keys, indexes, actual
+file hashes and receipt locators. This is a partial test pack, not a corrected
+source snapshot or a production-readiness claim.

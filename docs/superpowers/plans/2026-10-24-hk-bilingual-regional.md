@@ -1,5 +1,9 @@
 # ALS Hong Kong regional pack implementation ledger
 
+Historical phase receipt. The source-policy decision was approved on 25 October.
+Continue with [the partial-source ledger](2026-10-25-hk-partial-source.md);
+historical pending statements below describe the earlier strict-gate state.
+
 Spec: docs/superpowers/specs/2026-10-24-hk-bilingual-regional-design.md.
 User explicitly approved implementation, including independent pack and
 unresolved-only scope. Base v0.1.0 / 13ed06a. Work branch
