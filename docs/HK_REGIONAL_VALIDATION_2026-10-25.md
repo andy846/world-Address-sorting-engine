@@ -164,6 +164,21 @@ Initial local pip attempts failed due to sandbox DNS/temp paths; setting the
 workspace TEMP and disabling build isolation avoided downloading build tools.
 Installed-wheel acceptance is independently covered by the successful Linux CI.
 
+## Published test data and preserved formal release
+
+[Hong Kong ALS partial-source TEST data prerelease](https://github.com/andy846/world-Address-sorting-engine/releases/tag/hk-als-partial-2026-10-23-r1)
+is published as release ID 423126651, prerelease=true, draft=false, latest=false.
+Its annotated tag targets tested runtime fc19ef6. All four remote asset sizes
+and GitHub SHA256 digests exactly match the locally verified files.
+
+Post-publication verification confirmed v0.1.0 is still Latest (release ID
+422605557, target 13ed06a75335da31daad2fc797f7012e07bb043c), with all three
+original asset sizes and SHA256 digests unchanged. Main remains
+6fb302dd30bbed14dbc369da406a13bb488c2c54. Draft PR #3 was updated with these
+receipts and limitations; it and PR #2 retain their original bases and Draft
+state. The 0.2.0rc1 application remains a local/CI candidate, not a new formal
+release. Documentation-only commits do not change the tested runtime hash.
+
 No exhaustive coverage, deliverability, million-distinct throughput or
 production-readiness claim follows from these results. The regional option is
 off by default, and global GeoNames data remain separately required.

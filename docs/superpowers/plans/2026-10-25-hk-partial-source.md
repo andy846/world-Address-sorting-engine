@@ -10,7 +10,7 @@ the default remains strict. Retain original ZIP/schema and prior failed audits.
 - [x] Build real source snapshot; reconcile 183,964 read / 174,456 valid / 9,508 excluded before deduplication.
 - [x] Independent reviews, full regression, public four-language controls and private replay (two preserved baseline label errors explicitly recorded).
 - [x] Real regional-enabled million-row and fresh-process recovery; report limitations.
-- [ ] Candidate bundle/CI, independent attributed data-pack publication, update draft PR #3.
+- [x] Candidate bundle/CI, independent attributed TEST data-pack publication, update draft PR #3.
 
 Manifest extension `source_validation` contains policy (`strict` or
 `quarantine-invalid`), coverage (`complete` or `partial`), feature_count,
@@ -115,3 +115,19 @@ recovery reference, now supplied by the final dated validation report. No
 remaining important privacy/source-scope finding. Application all-label QA
 still fails on two protected baseline errors; only a separate TEST data
 prerelease is eligible, not formal application promotion.
+
+Published TEST data prerelease:
+https://github.com/andy846/world-Address-sorting-engine/releases/tag/hk-als-partial-2026-10-23-r1
+(release ID 423126651, prerelease=true, draft=false, latest=false).
+Annotated data tag targets the fully tested runtime fc19ef6. All four remote
+asset sizes/SHA256 digests match local verified files. Latest remains v0.1.0,
+release ID 422605557; all three original asset hashes/sizes are unchanged.
+Main remains 6fb302dd30bbed14dbc369da406a13bb488c2c54. PR #3 stays Draft/open
+with its original base; PR #2 also stays Draft/open. No application release,
+merge or private-data upload occurred. Documentation-only commits use skip-ci;
+the unchanged runtime and its exact successful CI receipts are recorded above.
+
+Next accuracy scope: separately reproduce and review the two global geographic
+leader errors before proposing any precedence change; examine the 42 remaining
+private unresolved cases locally. These remain blockers to formal promotion,
+not grounds to rewrite the accepted unresolved-only contract silently.
