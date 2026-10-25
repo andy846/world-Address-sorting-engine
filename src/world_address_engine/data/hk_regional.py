@@ -1,5 +1,6 @@
 """Read-only regional pack verification, normalized keys and immutable install."""
-from contextlib import closing
+from collections import OrderedDict
+from contextlib import closing, contextmanager
 import hashlib
 import json
 from pathlib import Path
@@ -7,10 +8,16 @@ import re
 import shutil
 import sqlite3
 import tempfile
+from threading import RLock
 import unicodedata
 
 PROFILE = 'HK_BILINGUAL_REGIONAL'
 SCHEMA_VERSION = NORMALIZATION_VERSION = 1
+# Process-local SQL verification receipts, never metadata or open handles.
+# The manifest pins quarantine bytes, which are still validated on every call.
+_VERIFICATION_CACHE: OrderedDict[tuple[str, str, str], bool] = OrderedDict()
+_VERIFICATION_CACHE_LOCK = RLock()
+_VERIFICATION_CACHE_LIMIT = 4
 _NOISE = frozenset(('the a an of and road rd street st avenue lane ln building bldg '
                     'industrial commercial centre center tower plaza house factory estate '
                     'block floor flat room unit court mansion').split())
@@ -110,13 +117,40 @@ def _verify_source_validation(metadata, db_path):
     return path
 
 
+@contextmanager
+def _verification_database_snapshot(db_path, db_sha256):
+    """Bind SQL to private bytes, independent of replacements at the source path."""
+    with tempfile.TemporaryDirectory(prefix='wae-hk-verify-') as directory:
+        snapshot = Path(directory) / 'pack.db'
+        shutil.copyfile(db_path, snapshot)
+        if _hash(snapshot) != db_sha256:
+            raise ValueError('Hong Kong pack changed while copying verification snapshot')
+        _standalone_database(snapshot)
+        with closing(sqlite3.connect(snapshot.as_uri() + '?mode=ro&immutable=1', uri=True)) as db:
+            yield db
+        if _hash(snapshot) != db_sha256:
+            raise ValueError('Hong Kong pack verification snapshot changed during SQL checks')
+        _standalone_database(snapshot)
+
+
+def _verify_snapshot_unchanged(db_path, manifest_bytes, metadata, quarantine_path):
+    """Recheck consumed bytes and standalone state on both cache paths."""
+    if (db_path.with_name('manifest.json').read_bytes() != manifest_bytes or
+            _hash(db_path) != metadata['db_sha256'] or
+            (quarantine_path is not None and
+             _hash(quarantine_path) != metadata['source_validation']['quarantine_sha256'])):
+        raise ValueError('Hong Kong pack changed during verification')
+    _standalone_database(db_path)
+
+
 def verify_hk_pack(db_path: Path, *, full: bool = True) -> dict:
     db_path = Path(db_path).resolve()
     manifest_path = db_path.with_name('manifest.json')
     if not db_path.is_file() or not manifest_path.is_file():
         raise ValueError('Hong Kong pack requires pack.db and manifest.json')
     try:
-        metadata = json.loads(manifest_path.read_text(encoding='utf-8'))
+        manifest_bytes = manifest_path.read_bytes()
+        metadata = json.loads(manifest_bytes.decode('utf-8'))
         required = {'pack_id','profile','pack_version','schema_version','normalization_version',
                     'source_date','source_url','source_sha256','schema_sha256','db_sha256',
                     'record_count','building_count','alias_count','alias_count_by_language',
@@ -144,10 +178,19 @@ def verify_hk_pack(db_path: Path, *, full: bool = True) -> dict:
         if any(not metadata[key] for key in ('source_url','source_date','conversion_version','attribution','license')):
             raise ValueError('missing Hong Kong pack provenance')
         quarantine_path = _verify_source_validation(metadata, db_path)
-        if _hash(db_path) != metadata['db_sha256']:
+        db_sha256 = _hash(db_path)
+        if db_sha256 != metadata['db_sha256']:
             raise ValueError('Hong Kong pack checksum mismatch')
         _standalone_database(db_path)
-        with closing(sqlite3.connect(db_path.as_uri() + '?mode=ro&immutable=1', uri=True)) as db:
+        cache_key = (str(db_path), db_sha256, hashlib.sha256(manifest_bytes).hexdigest())
+        with _VERIFICATION_CACHE_LOCK:
+            cached_full = _VERIFICATION_CACHE.get(cache_key)
+            if cached_full is not None:
+                _VERIFICATION_CACHE.move_to_end(cache_key)
+        if cached_full is not None and (cached_full or not full):
+            _verify_snapshot_unchanged(db_path, manifest_bytes, metadata, quarantine_path)
+            return metadata
+        with _verification_database_snapshot(db_path, db_sha256) as db:
             db.execute('PRAGMA query_only=ON')
             tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             if not {'hk_buildings','hk_addresses','hk_aliases','hk_pack_metadata'} <= tables:
@@ -204,13 +247,13 @@ def verify_hk_pack(db_path: Path, *, full: bool = True) -> dict:
                 raise ValueError('Hong Kong pack broken entity references')
             if full and db.execute('PRAGMA integrity_check').fetchall() != [('ok',)]:
                 raise ValueError('Hong Kong pack integrity check failed')
-        # Verify metadata and bytes again after consuming them.
-        if (json.loads(manifest_path.read_text(encoding='utf8')) != metadata or
-                _hash(db_path) != metadata['db_sha256'] or
-                (quarantine_path is not None and
-                 _hash(quarantine_path) != metadata['source_validation']['quarantine_sha256'])):
-            raise ValueError('Hong Kong pack changed during verification')
-        _standalone_database(db_path)
+        _verify_snapshot_unchanged(db_path, manifest_bytes, metadata, quarantine_path)
+        with _VERIFICATION_CACHE_LOCK:
+            # Concurrent misses may finish in either order; never lose full integrity.
+            _VERIFICATION_CACHE[cache_key] = bool(full or _VERIFICATION_CACHE.get(cache_key, False))
+            _VERIFICATION_CACHE.move_to_end(cache_key)
+            while len(_VERIFICATION_CACHE) > _VERIFICATION_CACHE_LIMIT:
+                _VERIFICATION_CACHE.popitem(last=False)
         return metadata
     except (OSError, sqlite3.Error, KeyError, TypeError, json.JSONDecodeError) as exc:
         raise ValueError('invalid or unreadable Hong Kong regional pack') from exc
