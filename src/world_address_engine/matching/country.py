@@ -13,7 +13,7 @@ from world_address_engine.matching.retrieve import retrieve_candidates, Occurren
 from world_address_engine.data.geonames_builder import normalize_search_key
 from world_address_engine.models import AddressRecord
 
-COUNTRY_RULES_VERSION = '2026-10-24.country.4'
+COUNTRY_RULES_VERSION = '2026-10-25.country.7'
 RIVAL_RATIO = 0.55
 MAX_ADDRESS_CHARS = 10_000
 CACHE_MAX_ENTRIES = 16_384
@@ -122,6 +122,10 @@ _STREET_AFTER = re.compile(r'^\s*(?:street|st|road|rd|avenue|ave|lane|ln|drive|d
 _STREET_TERM = re.compile(r'\b(?:street|st|road|rd|avenue|ave|lane|ln|drive|dr|boulevard|blvd)$|[街路巷弄]$', re.I)
 _STREET_ADDRESS = re.compile(
     r'^\s*\d+[a-z]?\s+.+\b(?:street|st|road|rd|avenue|ave|lane|ln|drive|dr|boulevard|blvd)\b', re.I)
+_NUMBERED_STREET = re.compile(
+    r'(?<![a-z0-9])[0-9]+[a-z]?(?:\s*[-/]\s*[0-9]+[a-z]?)?\s+'
+    r"(?:[a-z\u00c0-\u024f\u1e00-\u1eff][a-z\u00c0-\u024f\u1e00-\u1eff'’.-]*\s+){1,12}?"
+    r'(?:street|st|road|rd|avenue|ave|lane|ln|drive|dr|boulevard|blvd)\b', re.I)
 _BUILDING_AFTER = re.compile(
     r'^\s*(?:centre|center|building|tower|plaza|house|bank|university|hospital|industrial\s+park)\b'
     r'|^\s*(?:中心|大廈|大厦|大樓|大楼|廣場|广场|銀行|银行|大學|大学|橋|桥)'
@@ -242,13 +246,18 @@ class CountryClassifier:
     """Reusable, bounded estimator; catalogue codes have their own namespace."""
     rules_version = COUNTRY_RULES_VERSION
 
-    def __init__(self, geo_db: Path, catalogue=None):
+    def __init__(self, geo_db: Path, catalogue=None, *, hk_regional_db=None):
         if catalogue is None:
             from world_address_engine.data.country_codes import load_country_codes
             catalogue = load_country_codes()
         self.geo_db = Path(geo_db)
         if not self.geo_db.is_file():
             raise FileNotFoundError(self.geo_db)
+        self._hk_regional_path = Path(hk_regional_db) if hk_regional_db is not None else None
+        self._hk_regional = None
+        if self._hk_regional_path is not None:
+            from world_address_engine.data.hk_regional import verify_hk_pack
+            verify_hk_pack(self._hk_regional_path)
         self.catalogue = catalogue
         self._cache = OrderedDict()
         self._cache_text_bytes = 0
@@ -294,6 +303,9 @@ class CountryClassifier:
         self.close()
 
     def close(self):
+        if self._hk_regional is not None:
+            self._hk_regional.close()
+            self._hk_regional = None
         if self._db is not None:
             self._db.close()
             self._db = None
@@ -309,6 +321,10 @@ class CountryClassifier:
         cached = self._cache.get(key)
         if cached is None:
             value = self._infer(*key)
+            if (self._hk_regional_path is not None and 'HK' in self.catalogue.entries and
+                    value[0] is None and value[2] in {
+                        'NO_GEOGRAPHIC_MATCH', 'MULTIPLE_PLAUSIBLE_COUNTRIES'}):
+                value = self._regional_fallback(record.address_text, value)
             # Bound both entry count and retained text, including UTF-8 Han
             # keys and country hints. Oversized keys still classify normally.
             size = sum(len(part.encode('utf-8', errors='surrogatepass'))
@@ -324,6 +340,61 @@ class CountryClassifier:
             value = cached[0]
             self._cache.move_to_end(key)
         return CountryInference(record.record_no, *value)
+
+    def _regional_fallback(self, text, original):
+        from world_address_engine.matching.hk_regional import HKRegionalMatcher
+        if len(text) > 10_000:
+            return original
+        if self._hk_regional is None:
+            self._hk_regional = HKRegionalMatcher(self._hk_regional_path)
+        lines = list(self._hk_regional.eligible_lines(text))
+        eligible_map = dict(self._eligible_lines(lines))
+        for index, line in enumerate(lines):
+            if self._hk_regional.has_official_corporate_heading(line):
+                eligible_map[index] = line
+        # The general estimator conservatively drops a leading name block.
+        # A typed building/estate heading is address context for the regional
+        # two-component check; company and titled-recipient filters still apply.
+        for index, line in _location_lines(lines):
+            if index == 0 and index not in eligible_map and re.search(
+                    r'\b(?:building|bldg|tower|house|estate|centre|center|plaza)\s*$'
+                    r'|(?:大廈|大厦|大樓|大楼|中心|廣場|广场|邨|苑)\s*$', line):
+                eligible_map[index] = line
+        eligible = [line for _index, line in sorted(eligible_map.items())]
+        match = self._hk_regional.match('\n'.join(eligible))
+        if match is None:
+            return original
+        # Independent geographic fragments may share a comma-separated line or
+        # carry a postal code. Restrict checks to whole fragments, never city
+        # substrings within a street/building name or small incidental homonyms.
+        contexts = []
+        for line in eligible:
+            for part in re.split(r'[,;，；]', line):
+                part = re.sub(r'\s+\d[\d -]*\s*$', '', part.strip(' ,.;'))
+                part = _UK_POSTCODE_TAIL.sub('', part).strip(' ,.;')
+                if part and not _ADDRESS.search(part):
+                    contexts.append(part)
+        contextual = self._context_result('HK', 'HK_REGIONAL_ADDRESS_MATCH', contexts)
+        if contextual[0] is None:
+            return contextual
+        keys = sorted({normalize_search_key(form) for part in contexts for form in normalize_address(part)})
+        rivals = set()
+        if keys and self._db is None:
+            self._db = sqlite3.connect(self.geo_db.resolve().as_uri() + '?mode=ro', uri=True)
+            self._db.execute('PRAGMA query_only=ON')
+        for start in range(0, len(keys), 200):
+            chunk = keys[start:start + 200]
+            rows = self._db.execute(
+                'SELECT DISTINCT p.country_code FROM geo_aliases a '
+                'JOIN geo_places p ON p.place_id=a.place_id WHERE a.search_key IN ('
+                + ','.join('?' * len(chunk)) + ") AND p.feature_code IN ('ADM1','ADM2')", chunk)
+            rivals.update(mapped for country, in rows
+                          if (mapped := self.catalogue.geo_to_code.get(country)) in self.catalogue.entries
+                          and mapped != 'HK')
+        if rivals:
+            return (None, 'UNRESOLVED', 'CONFLICTING_GEOGRAPHIC_CONTEXT', (), tuple(sorted({'HK', *rivals})))
+        return ('HK', 'INFERRED', 'HK_REGIONAL_ADDRESS_MATCH',
+                tuple('HK_ALS:' + address_id for address_id in match.address_ids), ())
 
     def _explicit(self, lines, cleaned=None):
         found = set()
@@ -543,7 +614,13 @@ class CountryClassifier:
             for place_id, country, feature, population in rows:
                 if feature in {'PCLI', 'PCLX', 'PCLS', 'PCLD', 'ADM1', 'ADM2', 'PPLC', 'PPLA'} or (population or 0) >= 100_000:
                     qualified[place_id] = country
-        forms = tuple(form for line in scope.splitlines() for form in normalize_address(line))
+        # Bound street recognition at fragment boundaries, but retain full
+        # line normalization for geographic aliases such as Washington, D.C.
+        # A marker stops words across a removed street forming a new city name.
+        forms = tuple(form for line in scope.splitlines()
+                      for form in normalize_address(''.join(
+                          _NUMBERED_STREET.sub(' | ', fragment)
+                          for fragment in re.split(r'([,;，；])', line))))
         roles = {}
         for candidate in candidates:
             for term, _weight, _place_id in candidate.place_support:

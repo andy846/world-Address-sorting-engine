@@ -1,10 +1,13 @@
 """Packaging checks exercise reports and archives without building a real bundle."""
 
 import builtins
+from contextlib import closing
+import hashlib
 import json
 import os
 from pathlib import Path
 import subprocess
+import sqlite3
 import sys
 import tomllib
 
@@ -209,6 +212,165 @@ def test_bundle_rejects_missing_country_analysis_evidence(runtime_report):
     report = dict(runtime_report)
     report.pop('country_analysis', None)
     assert 'country_analysis' in entry.report_errors(report, expected_version=packaging.project_version())
+
+
+def test_bundle_proves_optional_regional_api_and_selected_gui_path(runtime_report):
+    assert runtime_report['hk_regional'] == {
+        'default_disabled': True, 'selected_path_used': True,
+        'same_address_positive': True, 'number_mismatch_negative': True,
+        'gui_complete': True, 'destination_counts': {'HK': 1},
+        'unresolved': 1, 'version_displayed': True,
+        'partial_source_displayed': True, 'quarantine_identity_pinned': True,
+    }
+
+
+def test_regional_smoke_uses_a_verified_partial_runtime_fixture(tmp_path):
+    pytest.importorskip('PySide6')
+    from PySide6.QtWidgets import QApplication
+    from world_address_engine.gui.country_app import CountryAnalysisWindow
+    from world_address_engine.data.hk_regional import verify_hk_pack
+
+    os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+    app = QApplication.instance() or QApplication([])
+    window = CountryAnalysisWindow()
+    try:
+        evidence = entry._regional_self_test(app, window, tmp_path)
+        root = tmp_path / 'regional'
+        contents = (root / 'quarantine.jsonl').read_bytes()
+        assert [json.loads(line) for line in contents.splitlines()] == [
+            {'source_member': 'synthetic.geojson', 'source_index': 2, 'reason': 'feature_schema'}]
+        expected = {
+            'policy': 'quarantine-invalid', 'coverage': 'partial',
+            'feature_count': 2, 'valid_feature_count': 1, 'quarantined_feature_count': 1,
+            'quarantine_file': 'quarantine.jsonl',
+            'quarantine_sha256': hashlib.sha256(contents).hexdigest(),
+        }
+        metadata = verify_hk_pack(root / 'pack.db')
+        assert metadata['source_validation'] == expected
+        with closing(sqlite3.connect(root / 'pack.db')) as db:
+            assert db.execute('SELECT source_index FROM hk_addresses').fetchall() == [(1,)]
+        assert window._last_report['run_metadata']['hk_regional']['source_validation'] == expected
+        assert 'Hong Kong: synthetic-smoke-1 (partial source; 1 excluded)' in window.source_versions.text()
+        assert evidence['partial_source_displayed'] is True
+        assert evidence['quarantine_identity_pinned'] is True
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_self_test_global_fixtures_satisfy_real_pack_validation(monkeypatch):
+    pytest.importorskip('PySide6')
+    from world_address_engine.jobs import country_analysis
+    original = country_analysis._pack_metadata
+    validated = set()
+
+    def validate(path, digest):
+        result = original(path, digest)
+        validated.add(path.name)
+        assert result['profile'] == 'EXTENDED_GLOBAL'
+        return result
+
+    monkeypatch.setattr(country_analysis, '_pack_metadata', validate)
+    result = entry.self_test()
+    assert result['ok'] is True
+    assert {'synthetic-geo.db', 'regional-global.db'} <= validated
+
+
+@pytest.mark.parametrize('field', ['default_disabled', 'selected_path_used',
+                                 'same_address_positive', 'number_mismatch_negative',
+                                 'gui_complete', 'destination_counts', 'unresolved',
+                                 'version_displayed', 'partial_source_displayed',
+                                 'quarantine_identity_pinned', None])
+@pytest.mark.parametrize('fault', ['missing', 'false'])
+def test_bundle_rejects_missing_or_false_regional_evidence(runtime_report, field, fault):
+    broken = dict(runtime_report)
+    if field is None:
+        broken.pop('hk_regional', None)
+    else:
+        broken['hk_regional'] = dict(runtime_report.get('hk_regional', {}))
+        if fault == 'missing':
+            broken['hk_regional'].pop(field, None)
+        else:
+            broken['hk_regional'][field] = False
+    assert 'hk_regional' in entry.report_errors(broken, expected_version=packaging.project_version())
+
+
+@pytest.mark.parametrize('field', ['partial_source_displayed', 'quarantine_identity_pinned'])
+@pytest.mark.parametrize('value', [0, 1, None, 'true'])
+def test_bundle_requires_boolean_partial_evidence(runtime_report, field, value):
+    broken = dict(runtime_report)
+    broken['hk_regional'] = dict(runtime_report['hk_regional'], **{field: value})
+    assert 'hk_regional' in entry.report_errors(broken, expected_version=packaging.project_version())
+
+
+def test_bundle_regional_smoke_does_not_import_build_only_dependencies(monkeypatch):
+    pytest.importorskip('PySide6')
+    real_import = builtins.__import__
+
+    def runtime_only(name, *args, **kwargs):
+        if name.split('.')[0] in {'ijson', 'jsonschema'} or name.endswith('hk_als_builder'):
+            raise AssertionError('build-only dependency imported by runtime self-test')
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, '__import__', runtime_only)
+    result = entry.self_test()
+    assert result['ok'] is True
+    assert result['hk_regional']['selected_path_used'] is True
+
+
+@pytest.mark.parametrize('failure', ['no_match', 'always_match', 'disabled_gui'])
+def test_regional_smoke_fails_when_runtime_behavior_is_broken(monkeypatch, failure):
+    pytest.importorskip('PySide6')
+    from world_address_engine.matching.hk_regional import HKRegionalMatcher, HKRegionalMatch
+    from world_address_engine.gui.country_app import CountryAnalysisWindow
+    if failure == 'no_match':
+        monkeypatch.setattr(HKRegionalMatcher, 'match', lambda *a: None)
+    elif failure == 'always_match':
+        monkeypatch.setattr(HKRegionalMatcher, 'match', lambda *a:
+                            HKRegionalMatch(('synthetic-address',), ('street', 'building_or_estate')))
+    else:
+        original = CountryAnalysisWindow.start_job
+
+        def disabled_gui(window):
+            window.hk_enabled.setChecked(False)
+            return original(window)
+
+        monkeypatch.setattr(CountryAnalysisWindow, 'start_job', disabled_gui)
+    result = entry.self_test()
+    assert result['ok'] is False
+    assert 'hk_regional' in result['assertion_failures']
+
+
+@pytest.mark.parametrize('failure', ['partial_label', 'missing_identity', 'changed_hash', 'extra_identity_field'])
+def test_regional_smoke_rejects_broken_partial_display_or_quarantine_identity(monkeypatch, failure):
+    pytest.importorskip('PySide6')
+    from world_address_engine.gui.country_app import CountryAnalysisWindow
+    original = CountryAnalysisWindow._apply_analysis
+
+    def corrupt_partial_evidence(window, payload):
+        original(window, payload)
+        regional = (window._last_report or {}).get('run_metadata', {}).get('hk_regional')
+        if not regional:
+            return
+        if failure == 'partial_label':
+            window.source_versions.setText(window.source_versions.text().replace(
+                ' (partial source; 1 excluded)', ''))
+        elif failure == 'missing_identity':
+            regional.pop('source_validation', None)
+        else:
+            validation = dict(regional.get('source_validation', {}))
+            if failure == 'changed_hash':
+                validation['quarantine_sha256'] = 'f' * 64
+            else:
+                validation['unexpected'] = True
+            regional['source_validation'] = validation
+
+    monkeypatch.setattr(CountryAnalysisWindow, '_apply_analysis', corrupt_partial_evidence)
+    result = entry.self_test()
+    assert result['ok'] is False
+    assert 'hk_regional' in result['assertion_failures']
+    evidence = 'partial_source_displayed' if failure == 'partial_label' else 'quarantine_identity_pinned'
+    assert result['hk_regional'][evidence] is False
 
 
 def test_bundle_proves_icon_progress_and_completed_pending_case_view(runtime_report):

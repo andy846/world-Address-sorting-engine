@@ -28,6 +28,7 @@ from world_address_engine.io.country_reports import _private_directory
 from world_address_engine.io.delimited import iter_csv_records, _record
 from world_address_engine.io.reports import _protect
 from world_address_engine.jobs.checkpoint import atomic_json, file_sha256
+from world_address_engine.data.hk_regional import hk_pack_metadata
 from world_address_engine.jobs.country_analysis import analyze_job, resume_analysis
 from world_address_engine.matching.country import COUNTRY_RULES_VERSION, CountryClassifier
 
@@ -46,7 +47,7 @@ def _oracle_item(fields, found):
             'reason': found.reason, 'candidates': list(found.candidates)}
 
 
-def _baseline_block(source, baseline, pack):
+def _baseline_block(source, baseline, pack, hk_regional=None):
     manifest = json.loads((baseline / 'Run_Manifest.json').read_text(encoding='utf-8-sig'))
     metadata = manifest.get('run_metadata', {})
     if manifest.get('run_status') != 'COMPLETE' or manifest.get('job_kind') != 'country-analysis':
@@ -57,6 +58,8 @@ def _baseline_block(source, baseline, pack):
         raise ValueError('baseline source hash changed')
     if metadata.get('geo_sha256') != file_sha256(pack):
         raise ValueError('baseline reference pack hash changed')
+    if metadata.get('hk_regional') != hk_regional:
+        raise ValueError('baseline regional selection changed')
     from world_address_engine.data.country_codes import load_country_codes
     from world_address_engine.jobs.country_analysis import _catalogue_metadata
     for key, value in _catalogue_metadata(load_country_codes()).items():
@@ -95,7 +98,8 @@ def _baseline_block(source, baseline, pack):
     return block, columns, manifest
 
 
-def prepare_workload(source, baseline, controls, workspace, pack, *, repeats=100, control_rows=396):
+def prepare_workload(source, baseline, controls, workspace, pack, *, repeats=100, control_rows=396,
+                     hk_regional_db=None):
     """Make a private copy without changing source values or original IDs."""
     source, baseline, controls, workspace, pack = map(
         lambda value: Path(value).resolve(), (source, baseline, controls, workspace, pack))
@@ -106,7 +110,8 @@ def prepare_workload(source, baseline, controls, workspace, pack, *, repeats=100
     if (isinstance(repeats, bool) or not isinstance(repeats, int) or repeats < 1 or
             isinstance(control_rows, bool) or not isinstance(control_rows, int) or control_rows < 0):
         raise ValueError('repeat/control counts must be nonnegative integers, repeats positive')
-    block, address_columns, manifest = _baseline_block(source, baseline, pack)
+    regional = hk_pack_metadata(hk_regional_db) if hk_regional_db is not None else None
+    block, address_columns, manifest = _baseline_block(source, baseline, pack, regional)
     source_hash = file_sha256(source)
     baseline_hashes = {name: file_sha256(baseline / name) for name in
                        ('Run_Manifest.json', 'Classified_Addresses.csv', 'Country_Diagnostics.csv', 'Country_Summary.csv')}
@@ -118,7 +123,7 @@ def prepare_workload(source, baseline, controls, workspace, pack, *, repeats=100
         raise ValueError('public control source manifest missing')
     if len({c.get('control_id') for c in pool}) != len(pool):
         raise ValueError('duplicate public control identifier')
-    with CountryClassifier(pack) as classifier:
+    with CountryClassifier(pack, hk_regional_db=hk_regional_db) as classifier:
         for index in range(control_rows):
             control = pool[index % len(pool)]
             if (not re.fullmatch('[A-Z]{2}', control.get('expected_code', '')) or
@@ -138,6 +143,8 @@ def prepare_workload(source, baseline, controls, workspace, pack, *, repeats=100
     # All validity/control checks happen before creating any private artifacts.
     if file_sha256(source) != source_hash or file_sha256(controls) != controls_hash:
         raise ValueError('source or controls changed during preparation')
+    if regional != (hk_pack_metadata(hk_regional_db) if hk_regional_db is not None else None):
+        raise ValueError('regional pack changed during preparation')
     workspace.mkdir(parents=True, exist_ok=False)
     _private_directory(workspace)
     (workspace / '.gitignore').write_text('*\n', encoding='utf-8')
@@ -145,7 +152,8 @@ def prepare_workload(source, baseline, controls, workspace, pack, *, repeats=100
               'repeats': repeats, 'original_records': original_records,
               'control_rows_per_block': control_rows, 'address_columns': list(address_columns),
               'original_input_sha256': source_hash, 'baseline_hashes': baseline_hashes,
-              'controls_sha256': controls_hash, 'pack_sha256': file_sha256(pack), 'block': block}
+              'controls_sha256': controls_hash, 'pack_sha256': file_sha256(pack),
+              'hk_regional': regional, 'block': block}
     atomic_json(workspace / 'oracle.json', oracle)
     with (workspace / 'dataset.csv').open('x', encoding='utf-8-sig', newline='') as stream:
         writer = csv.writer(stream)
@@ -183,7 +191,7 @@ def _load_workload(workspace):
     oracle = json.loads((workspace / 'oracle.json').read_text(encoding='utf-8'))
     for key in ('schema_version', 'rules_version', 'repeats', 'original_records',
                 'control_rows_per_block', 'address_columns', 'original_input_sha256',
-                'controls_sha256', 'pack_sha256'):
+                'controls_sha256', 'pack_sha256', 'hk_regional'):
         if info.get(key) != oracle.get(key):
             raise ValueError('benchmark oracle metadata changed')
     if (info['block_records'] != len(oracle['block']) or
@@ -213,7 +221,8 @@ def _revision():
             'runtime_source_sha256': digest.hexdigest()}
 
 
-def run_workload(workspace, pack, name='uninterrupted', *, resume=False, stop_after=None, batch_size=1000):
+def run_workload(workspace, pack, name='uninterrupted', *, resume=False, stop_after=None, batch_size=1000,
+                 hk_regional_db=None):
     """Called as a separate OS process for each uninterrupted/stop/resume leg."""
     from benchmark_batch import peak_rss_bytes, tree_size
     workspace, pack = Path(workspace).resolve(), Path(pack).resolve()
@@ -226,6 +235,9 @@ def run_workload(workspace, pack, name='uninterrupted', *, resume=False, stop_af
         raise ValueError('benchmark database hash changed')
     if info['rules_version'] != COUNTRY_RULES_VERSION:
         raise ValueError('benchmark rules changed')
+    regional = hk_pack_metadata(hk_regional_db) if hk_regional_db is not None else None
+    if info.get('hk_regional') != regional:
+        raise ValueError('benchmark regional selection changed')
     output = workspace / name
     started, last_written = time.perf_counter(), 0.0
     cancel = False
@@ -275,6 +287,7 @@ def run_workload(workspace, pack, name='uninterrupted', *, resume=False, stop_af
         else:
             result = analyze_job(workspace / 'dataset.csv', output, pack,
                                  {'address_columns': info['address_columns']}, batch_size=batch_size,
+                                 hk_regional_db=hk_regional_db,
                                  on_progress=committed, on_event=event, cancel_requested=lambda: cancel)
     finally:
         CountryClassifier.classify, CountryClassifier._infer = original_classify, original_infer
@@ -293,7 +306,7 @@ def run_workload(workspace, pack, name='uninterrupted', *, resume=False, stop_af
                'records_per_second': round(info['total_records'] / seconds, 2) if result['run_status'] == 'COMPLETE' and not resume else None,
                'completed_report_bytes': sum(p.stat().st_size for p in output.iterdir() if p.is_file()),
                'checkpoint_removed': not (output / '.country-state').exists(),
-               'rules_version': COUNTRY_RULES_VERSION}
+               'rules_version': COUNTRY_RULES_VERSION, 'hk_regional': regional}
     atomic_json(workspace / f'metrics-{name}-{"resume" if resume else "start"}.json', metrics)
     return metrics
 
@@ -306,6 +319,10 @@ def verify_workload(workspace, name='uninterrupted', compare=None):
     info, oracle = _load_workload(workspace)
     if file_sha256(workspace / 'dataset.csv') != info['dataset_sha256']:
         raise ValueError('benchmark dataset hash changed')
+    for run in [name, *([_safe_name(compare)] if compare else [])]:
+        manifest = json.loads((workspace / run / 'Run_Manifest.json').read_text(encoding='utf-8-sig'))
+        if manifest.get('run_metadata', {}).get('hk_regional') != info.get('hk_regional'):
+            raise ValueError('verified run regional selection differs from the pinned workload')
     started = time.perf_counter()
     result = verify_repeated_output(workspace / 'dataset.csv', workspace / name,
                                     oracle['block'], oracle['repeats'])
@@ -330,6 +347,7 @@ def main():
         prep.add_argument('--' + name, type=Path, required=True)
     prep.add_argument('--repeats', type=int, default=100)
     prep.add_argument('--control-rows', type=int, default=396)
+    prep.add_argument('--hk-regional-db', type=Path)
     for op in ('run', 'resume'):
         command = sub.add_parser(op)
         command.add_argument('--workspace', type=Path, required=True)
@@ -337,6 +355,7 @@ def main():
         command.add_argument('--name', default='uninterrupted')
         command.add_argument('--stop-after', type=int)
         command.add_argument('--batch-size', type=int, default=1000)
+        command.add_argument('--hk-regional-db', type=Path)
     verification = sub.add_parser('verify')
     verification.add_argument('--workspace', type=Path, required=True)
     verification.add_argument('--name', default='uninterrupted')
