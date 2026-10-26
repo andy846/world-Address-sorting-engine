@@ -133,6 +133,8 @@ def _preflight_input(path: Path, options: dict) -> None:
 def _pack_metadata(geo_db: Path, geo_digest: str) -> dict:
     manifest_path = geo_db.with_name('manifest.json')
     manifest = json.loads(manifest_path.read_text(encoding='utf8')) if manifest_path.is_file() else {}
+    if 'db_sha256' in manifest and manifest['db_sha256'] != geo_digest:
+        raise ValueError('geo pack checksum does not match its manifest')
     if manifest.get('profile') == HK_PROFILE:
         raise ValueError('Choose a global GeoNames pack here; Hong Kong regional packs have a separate option.')
     with open_db(geo_db) as connection:
@@ -416,7 +418,8 @@ def _process(output: Path, cfg: dict, *, max_batches=None, on_progress=None, on_
 
 def analyze_job(input_path, output_dir, geo_db, input_options: dict | None = None, *,
                 catalogue_path=None, hk_regional_db=None, batch_size=1000, max_batches=None,
-                on_progress=None, on_event=None, cancel_requested=None, keep_checkpoint=False) -> dict:
+                on_progress=None, on_event=None, cancel_requested=None, keep_checkpoint=False,
+                expected_reference_identity=None) -> dict:
     """Start an estimate with integer commit progress and optional count-only events.
 
     A new job requires an empty output directory. PAUSED and CANCELLED results
@@ -456,6 +459,11 @@ def analyze_job(input_path, output_dir, geo_db, input_options: dict | None = Non
            'input_sha256': input_digest, 'geo_sha256': geo_digest,
            'input_options': options, 'input_options_sha256': _json_hash(options),
            **_pack_metadata(geo_db, geo_digest), **_catalogue_metadata(catalogue)}
+    if expected_reference_identity is not None:
+        actual_identity = {key: cfg[key] for key in
+                           ('geo_sha256', 'geo_manifest_sha256', 'hk_regional')}
+        if expected_reference_identity != actual_identity:
+            raise ValueError('reference packs changed after verification')
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
         raise FileExistsError('existing country analysis output')
