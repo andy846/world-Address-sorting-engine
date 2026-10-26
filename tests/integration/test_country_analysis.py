@@ -40,7 +40,7 @@ def test_analysis_streams_originals_and_counts_without_hkp(tmp_path):
     assert sum(manifest['status_counts'].values()) == 4
     rows = read(out / 'Classified_Addresses.csv')
     assert list(rows[0]) == ['Control no', 'NAME_ADDRESS_LINE1', 'Unnamed_1',
-                             'Extra', 'Extra_2', 'Country_Code']
+                             'Extra', 'Extra_2', 'Country_Code', 'Zone_Code', 'NOVSN_Zone_Code']
     assert [r['Control no'] for r in rows] == ['000001', '000002', '000003', '000004']
     assert [r['Country_Code'] for r in rows] == ['JP', '', 'IN', 'JP']
     assert rows[0]['Unnamed_1'] == "'=2+2"
@@ -200,7 +200,8 @@ def test_other_input_formats_and_empty_csv(tmp_path, kind):
     if kind == 'empty_csv':
         with (out / 'Classified_Addresses.csv').open(encoding='utf-8-sig') as stream:
             assert next(csv.reader(stream)) == ['Control no', 'NAME_ADDRESS_LINE1',
-                                               'Unnamed_1', 'Extra', 'Extra_2', 'Country_Code']
+                                               'Unnamed_1', 'Extra', 'Extra_2', 'Country_Code',
+                                               'Zone_Code', 'NOVSN_Zone_Code']
 
 
 def test_cli_analyze_and_resume_auto_detect_analysis(tmp_path, capsys):
@@ -225,9 +226,12 @@ def test_variable_width_delimited_txt_preserves_all_original_fields(tmp_path):
     manifest = job.resume_analysis(out)
     assert manifest['total_records'] == 3
     assert read(out / 'Classified_Addresses.csv') == [
-        {'Text_1': 'Japan', 'Text_2': '', 'Text_3': '', 'Country_Code': 'JP'},
-        {'Text_1': 'India', 'Text_2': '0007', 'Text_3': "'=synthetic", 'Country_Code': 'IN'},
-        {'Text_1': 'Japan', 'Text_2': '0008', 'Text_3': '', 'Country_Code': 'JP'},
+        {'Text_1': 'Japan', 'Text_2': '', 'Text_3': '', 'Country_Code': 'JP',
+         'Zone_Code': '2', 'NOVSN_Zone_Code': 'D'},
+        {'Text_1': 'India', 'Text_2': '0007', 'Text_3': "'=synthetic", 'Country_Code': 'IN',
+         'Zone_Code': '1', 'NOVSN_Zone_Code': 'C'},
+        {'Text_1': 'Japan', 'Text_2': '0008', 'Text_3': '', 'Country_Code': 'JP',
+         'Zone_Code': '2', 'NOVSN_Zone_Code': 'D'},
     ]
 
 

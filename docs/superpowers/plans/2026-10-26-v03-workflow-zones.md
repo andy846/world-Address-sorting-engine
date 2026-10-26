@@ -62,7 +62,7 @@ CURRENT_RELEASE.json; no main merge or formal promotion before new manual accept
 
 - [x] A: independent data worker owns zone_mappings.py, resource JSON,
   tools/import_country_zones.py and new tests/unit/test_zone_mappings.py only.
-- [ ] B: main implementer owns country_reports.py, country_analysis.py,
+- [x] B: main implementer owns country_reports.py, country_analysis.py,
   country_cases.py and corresponding non-GUI report/job/cases tests.
 - [ ] C: GUI worker owns country_app.py, country_layout.py,country_results.py,
   new GUI helper modules, GUI integration tests; default/missing pack, automatic
@@ -105,3 +105,9 @@ updating those assertions with explicit IN/JP/blank zone values, 75 passed in
 Execution resumed after an automatic-approval service usage-limit interruption;
 the final test-assertion patch had not executed, was verified absent and then
 applied normally after service recovery. No alternative approval bypass used.
+
+Task B reviewed: independent reviewer ran 132 targeted tests and all-235-code
+probes; no important findings. Verified schema/downgrade rejection, mapping
+changes before export/finalization, report read races, unchanged diagnostics,
+legacy blank zones and state2 rejection without mutation. Main rerun including
+candidate metadata: 55 passed in 16.13s (overlapping focused group).

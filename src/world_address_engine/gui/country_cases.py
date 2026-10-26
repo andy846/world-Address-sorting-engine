@@ -16,7 +16,8 @@ from world_address_engine.io.reports import _protect
 
 PAGE_SIZE = 100
 MODES = ('pending', 'inferred', 'all')
-EXPORT_HEADER = ('Source_Record_No', 'Address', 'Status', 'Country_Code', 'Reason', 'Candidates')
+EXPORT_HEADER = ('Source_Record_No', 'Address', 'Status', 'Country_Code',
+                 'Zone_Code', 'NOVSN_Zone_Code', 'Reason', 'Candidates')
 REASONS = {
     'HK_REGIONAL_ADDRESS_MATCH': 'Supporting address details match the offline Hong Kong address pack.',
     'EMPTY_ADDRESS': 'No address text was supplied.',
@@ -77,6 +78,20 @@ def _manifest(output):
             or manifest.get('run_status', manifest.get('state')) != 'COMPLETE'
             or type(total) is not int or total < 0):
         raise ValueError('Case review requires a completed country-analysis manifest.')
+    schema = manifest.get('report_schema_version', 1)
+    if type(schema) is not int or schema not in (1, 2):
+        raise ValueError('Unsupported country report schema.')
+    if schema == 2:
+        from world_address_engine.io.country_reports import GENERATED_COLUMNS
+        mapping = manifest.get('run_metadata', {}).get('zone_mapping')
+        if (manifest.get('generated_columns') != list(GENERATED_COLUMNS) or
+                not isinstance(mapping, dict) or
+                set(mapping) != {'version', 'source_sha256', 'sha256'} or
+                not isinstance(mapping['version'], str) or not mapping['version'] or
+                any(not isinstance(mapping[key], str) or
+                    not re.fullmatch('[0-9a-f]{64}', mapping[key])
+                    for key in ('source_sha256', 'sha256'))):
+            raise ValueError('Invalid country report schema or zone mapping identity.')
     return manifest
 
 
@@ -94,14 +109,17 @@ def _paired_cases(output, *, address_columns=(), cancel_requested=None):
             io.TextIOWrapper(diagnostic_bytes, encoding='utf-8-sig', newline='') as diagnostics:
         source, diagnoses = csv.reader(detail, strict=True), csv.reader(diagnostics, strict=True)
         header, diagnostic_header = next(source, []), next(diagnoses, [])
-        if not header or header[-1] != 'Country_Code' or diagnostic_header != [
+        generated = (['Country_Code'] if manifest.get('report_schema_version', 1) == 1 else
+                     ['Country_Code', 'Zone_Code', 'NOVSN_Zone_Code'])
+        if len(header) < len(generated) or header[-len(generated):] != generated or diagnostic_header != [
                 'Source_Record_No', 'Status', 'Reason', 'Candidates']:
             raise ValueError('Country case report headers are invalid.')
+        original = header[:-len(generated)]
         selected_names = {_protect(column) for column in columns}
-        indices = [i for i, name in enumerate(header[:-1]) if not columns or name in selected_names]
-        if columns and any(_protect(column) not in header[:-1] for column in columns):
+        indices = [i for i, name in enumerate(original) if not columns or name in selected_names]
+        if columns and any(_protect(column) not in original for column in columns):
             raise ValueError('Saved address columns are not present in the case report.')
-        if columns and any(header[:-1].count(name) > 1 for name in selected_names):
+        if columns and any(original.count(name) > 1 for name in selected_names):
             raise ValueError('Ambiguous address headers after formula protection; use unambiguous source headers.')
         previous = 0
         try:
@@ -112,13 +130,18 @@ def _paired_cases(output, *, address_columns=(), cancel_requested=None):
                         or len(diagnosis) != 4 or diagnosis[0] != str(number)):
                     raise ValueError('Country case reports do not align by source record number.')
                 _, status, reason, candidates = diagnosis
-                code = fields[-1]
+                code = fields[-len(generated)]
+                zone, novsn = fields[-2:] if len(generated) == 3 else ('', '')
                 if (status not in ('DETERMINED', 'INFERRED', 'UNRESOLVED')
                         or ((status == 'UNRESOLVED') != (code == ''))):
                     raise ValueError('Country case status and country code do not agree.')
+                if len(generated) == 3 and ((not code and (zone or novsn)) or
+                                            (code and (not zone or not novsn))):
+                    raise ValueError('Country case zone fields do not agree with country code.')
                 previous = number
                 yield {'record_no': number, 'address': '\n'.join(fields[i] for i in indices if fields[i]),
-                       'status': status, 'code': code, 'reason': reason, 'candidates': candidates,
+                       'status': status, 'code': code, 'zone_code': zone, 'novsn_zone_code': novsn,
+                       'reason': reason, 'candidates': candidates,
                        'explanation': REASONS.get(reason, reason.replace('_', ' ').capitalize())}
         except csv.Error as exc:
             raise ValueError('Country case report CSV is malformed.') from exc
@@ -177,7 +200,8 @@ def export_cases(output_dir, destination, mode='pending', *, address_columns=(),
             for row in cases:
                 if _selected(row, mode):
                     writer.writerow([row['record_no'], *[_protect(row[key]) for key in
-                                     ('address', 'status', 'code', 'reason', 'candidates')]])
+                                     ('address', 'status', 'code', 'zone_code', 'novsn_zone_code',
+                                      'reason', 'candidates')]])
                     count += 1
             stream.flush()
             os.fsync(stream.fileno())

@@ -41,16 +41,17 @@ def test_reports_conserve_counts_and_publish_safe_minimal_files(tmp_path):
     assert result['destination_counts'] == {'IN': 2, 'JP': 1}
     assert result['total_records'] == 4
     rows = read(tmp_path / 'Classified_Addresses.csv')
-    assert list(rows[0]) == ['ID', 'Address', 'Country_Code']
-    assert rows[0] == {'ID': '0001', 'Address': "'=synthetic", 'Country_Code': 'IN'}
+    assert list(rows[0]) == ['ID', 'Address', 'Country_Code', 'Zone_Code', 'NOVSN_Zone_Code']
+    assert rows[0] == {'ID': '0001', 'Address': "'=synthetic", 'Country_Code': 'IN',
+                       'Zone_Code': '1', 'NOVSN_Zone_Code': 'C'}
     assert [row['Country_Code'] for row in rows] == ['IN', 'JP', '', 'IN']
     assert read(tmp_path / 'Country_Summary.csv') == [
         {'Country_Code': 'IN', 'Country_Name_TC': 'India TC', 'Country_Name_EN': 'India',
-         'Count': '2', 'Percentage': '50.00'},
+         'Zone_Code': '1', 'NOVSN_Zone_Code': 'C', 'Count': '2', 'Percentage': '50.00'},
         {'Country_Code': 'JP', 'Country_Name_TC': 'Japan TC', 'Country_Name_EN': 'Japan',
-         'Count': '1', 'Percentage': '25.00'},
+         'Zone_Code': '2', 'NOVSN_Zone_Code': 'D', 'Count': '1', 'Percentage': '25.00'},
         {'Country_Code': '', 'Country_Name_TC': '', 'Country_Name_EN': '',
-         'Count': '1', 'Percentage': '25.00'},
+         'Zone_Code': '', 'NOVSN_Zone_Code': '', 'Count': '1', 'Percentage': '25.00'},
     ]
     diagnostics = (tmp_path / 'Country_Diagnostics.csv').read_text(encoding='utf-8-sig')
     assert 'PRIVATE_EVIDENCE' not in diagnostics and '=synthetic' not in diagnostics
@@ -97,7 +98,8 @@ def test_empty_report_preserves_original_columns(tmp_path):
                                            original_columns=['ID', 'Address', 'Unnamed_1'])
     assert report['total_records'] == 0
     with (tmp_path / 'Classified_Addresses.csv').open(encoding='utf-8-sig') as stream:
-        assert next(csv.reader(stream)) == ['ID', 'Address', 'Unnamed_1', 'Country_Code']
+        assert next(csv.reader(stream)) == ['ID', 'Address', 'Unnamed_1', 'Country_Code',
+                                          'Zone_Code', 'NOVSN_Zone_Code']
 
 
 def test_formula_headers_are_neutralized_and_existing_country_column_is_preserved(tmp_path):
@@ -106,4 +108,5 @@ def test_formula_headers_are_neutralized_and_existing_country_column_is_preserve
         {'=Header': '0007', 'Country_Code': 'original-code'})]), tmp_path, catalogue(), {})
     with (tmp_path / 'Classified_Addresses.csv').open(encoding='utf-8-sig', newline='') as stream:
         assert list(csv.reader(stream)) == [
-            ["'=Header", 'Country_Code', 'Country_Code'], ['0007', 'original-code', 'JP']]
+            ["'=Header", 'Country_Code', 'Country_Code', 'Zone_Code', 'NOVSN_Zone_Code'],
+            ['0007', 'original-code', 'JP', '2', 'D']]

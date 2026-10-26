@@ -21,7 +21,7 @@ from world_address_engine.matching.country import (
 from world_address_engine.models import AddressRecord
 from world_address_engine.sqlite_util import open_db
 
-STATE_VERSION = '2026-10-24.country-state.2'
+STATE_VERSION = '2026-10-26.country-state.3'
 JOB_KIND = 'country-analysis'
 FINALIZATION_DIR = '.country-finalize'
 
@@ -165,11 +165,26 @@ def _catalogue_metadata(catalogue) -> dict:
             'catalogue_fingerprint': catalogue.fingerprint}
 
 
+def _load_zones():
+    from world_address_engine.data.zone_mappings import load_zone_mappings
+    return load_zone_mappings()
+
+
+def _zone_metadata(zones=None) -> dict:
+    zones = _load_zones() if zones is None else zones
+    return {'version': zones.version, 'source_sha256': zones.source_sha256,
+            'sha256': zones.fingerprint}
+
+
 def _assert_sources_unchanged(cfg: dict, *, on_event=None) -> None:
     if cfg.get('job_kind') != JOB_KIND or cfg.get('schema_version') != STATE_VERSION:
+        if cfg.get('schema_version') == '2026-10-24.country-state.2':
+            raise ValueError('Use v0.2.0 to resume this older country checkpoint; start a new analysis for zone output.')
         raise ValueError('unsupported country checkpoint version or kind')
     if cfg.get('rules_version') != COUNTRY_RULES_VERSION:
         raise ValueError('country rules version changed; start a new analysis')
+    if cfg.get('zone_mapping') != _zone_metadata():
+        raise ValueError('zone mapping changed since country checkpoint')
     if _json_hash(cfg['input_options']) != cfg['input_options_sha256']:
         raise ValueError('input options profile changed since checkpoint')
     for label, path_key, hash_key in (('input', 'input_path', 'input_sha256'),
@@ -284,6 +299,9 @@ def _process(output: Path, cfg: dict, *, max_batches=None, on_progress=None, on_
     paths, last_committed = committed_shards(state, expected_rules_version=COUNTRY_RULES_VERSION)
     catalogue = load_country_codes(Path(cfg['catalogue_path']) if cfg['catalogue_path'] else None)
     columns = _original_columns(Path(cfg['input_path']), cfg['input_options'])
+    zones = _load_zones()
+    if cfg.get('zone_mapping') != _zone_metadata(zones):
+        raise ValueError('zone mapping changed since country checkpoint')
     source = iter(_records(Path(cfg['input_path']), cfg['input_options']))
     sparse_columns = Path(cfg['input_path']).suffix.lower() == '.txt'
     batch = []
@@ -353,6 +371,7 @@ def _process(output: Path, cfg: dict, *, max_batches=None, on_progress=None, on_
                 'pack_format_version', 'profile', 'input_options_sha256', 'batch_size')}
             metadata['address_columns'] = cfg['input_options']['address_columns']
             metadata['hk_regional'] = cfg.get('hk_regional')
+            metadata['zone_mapping'] = dict(cfg['zone_mapping'])
 
             def before_manifest():
                 progress.emit('exporting', last_committed, last_committed,
@@ -380,7 +399,7 @@ def _process(output: Path, cfg: dict, *, max_batches=None, on_progress=None, on_
                 result = write_country_reports(
                     verified, output, catalogue, metadata,
                     original_columns=columns, allow_sparse_columns=sparse_columns,
-                    before_manifest=before_manifest)
+                    before_manifest=before_manifest, zone_catalogue=zones)
             recovery = output / FINALIZATION_DIR
             if recovery.exists():
                 shutil.rmtree(recovery)
@@ -428,8 +447,9 @@ def analyze_job(input_path, output_dir, geo_db, input_options: dict | None = Non
     progress.emit('loading')
     catalogue_path = Path(catalogue_path).resolve() if catalogue_path is not None else None
     catalogue = load_country_codes(catalogue_path)
+    zones = _load_zones()
     cfg = {'job_kind': JOB_KIND, 'schema_version': STATE_VERSION,
-           'hk_regional': regional,
+           'hk_regional': regional, 'zone_mapping': _zone_metadata(zones),
            'rules_version': COUNTRY_RULES_VERSION, 'batch_size': batch_size,
            'input_path': str(input_path), 'geo_db': str(geo_db),
            'catalogue_path': str(catalogue_path) if catalogue_path is not None else None,
