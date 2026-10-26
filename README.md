@@ -2,8 +2,36 @@
 
 A Python, **offline-first** address-list analyzer. Its default workflow outputs
 one **Country Code** per address plus counts by code, using English, Traditional
-Chinese and Simplified Chinese input. Air/surface service, rates, Zone and
-Novsn codes are not part of this analysis.
+Chinese and Simplified Chinese input. The v0.3 candidate adds literal Zone and
+NOVSN mappings from the supplied country list. It does not infer mail services
+or rates.
+
+## v0.3 candidate workflow
+
+This branch develops **0.3.0rc1**; v0.2.0 below remains the sole accepted formal
+release. Candidate builds require new manual acceptance before promotion.
+
+- Installed global Extended (Compact fallback) and Hong Kong packs are discovered
+  automatically. Hong Kong starts enabled; choose an installed pack or explicitly
+  turn it off if unavailable. Reference verification runs in the background.
+- Each fresh GUI analysis creates `<input-name>_output_YYYYMMDD_HHMMSS` beside
+  the input. A custom output setting chooses its parent folder; collisions get
+  numbered suffixes. Resume uses the original run folder. CLI `--output` still
+  denotes an exact folder.
+- The **Single address lookup** tab accepts multiple address lines. Ctrl+Enter
+  queries locally, and Copy code copies the result. It also works during a
+  batch; editing or clearing the input invalidates the previous result. No
+  address history is saved.
+- New detail reports append `Country_Code`, `Zone_Code`, `NOVSN_Zone_Code`.
+  CN maps to `CN - Airmail` / `F`, HK to `LOCAL` / `A`, MO to
+  `Macau - Surface` / `M`, and TW to `Taiwan` / `F`. These are reference-table
+  labels, with no new service selection. Unresolved records leave all three
+  fields blank.
+
+New report manifests use schema 2 and pin the mapping version and hashes.
+Completed legacy reports can be inspected with blank zone fields; their files
+are preserved. Interrupted v0.2.0 jobs must be resumed with v0.2.0.
+The PDF parser is an optional build dependency only.
 
 ## Country Code analysis (v0.2.0)
 
