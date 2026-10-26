@@ -1,6 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 import pytest
+pytest.importorskip('PySide6')
 from world_address_engine.gui import country_app as gui
 from tests.integration.test_country_gui import app, window, reference_settings
 
