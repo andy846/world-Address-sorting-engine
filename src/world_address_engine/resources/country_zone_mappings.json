@@ -1,0 +1,3786 @@
+{
+  "schema_version": 1,
+  "version": "user-provided-zones-20250708-v1",
+  "profile": "USER_PROVIDED",
+  "source": {
+    "filename": "1-CountryList_20250708.pdf",
+    "sha256": "41b84a0938c1ebe320514b29c567ceedcf9f9868e99f84f3387bb8899cf2f373",
+    "page_count": 5,
+    "row_count": 236
+  },
+  "entries": [
+    {
+      "country_code": "AF",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "AL",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "DZ",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "AD",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "AO",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "AI",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "AG",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "AR",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "AM",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "AW",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "XD",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "AU",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "AT",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "AZ",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "XH",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "BS",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "BH",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "XJ",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "BD",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "BB",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "BY",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "BE",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "BZ",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "BJ",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "BM",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "BT",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "BO",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "BA",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "BW",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "BR",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "BN",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "BG",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "BF",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "BI",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "KH",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "CM",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "CA",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "XA",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "CV",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "XK",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "KY",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "CF",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "TD",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "CL",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "CN",
+      "zone_code": "CN - Airmail",
+      "novsn_zone_code": "F"
+    },
+    {
+      "country_code": "CX",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "CC",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "CO",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "KM",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "CG",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "CK",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "XF",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "CR",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "CI",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "HR",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "CU",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "CY",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "CZ",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "CD",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "DK",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "DJ",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "DM",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "DO",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "EC",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "EG",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "SV",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "GQ",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "ER",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "EE",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "SZ",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "ET",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "FK",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "FO",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "FJ",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "FI",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "FR",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "GF",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "PF",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "GA",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "GM",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "XE",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "GE",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "DE",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "GH",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "GI",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "GR",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "GL",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "GD",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "GP",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "GU",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "GT",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "GN",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "GW",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "GY",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "HT",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "HN",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "HK",
+      "zone_code": "LOCAL",
+      "novsn_zone_code": "A"
+    },
+    {
+      "country_code": "HU",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "IS",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "IN",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "ID",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "IR",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "IQ",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "IE",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "IL",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "IT",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "JM",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "JP",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "JO",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "KZ",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "KE",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "KI",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "KP",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "KR",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "XO",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "KW",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "KG",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "LA",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "LV",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "LB",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "LS",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "LI",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "LT",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "LU",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "MO",
+      "zone_code": "Macau - Surface",
+      "novsn_zone_code": "M"
+    },
+    {
+      "country_code": "MK",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "MG",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "XI",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "MW",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "MY",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "MV",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "ML",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "MT",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "MP",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "MH",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "MQ",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "MR",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "MU",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "MX",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "FM",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "MD",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "MC",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "MN",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "ME",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "MS",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "MA",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "MZ",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "MM",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "NA",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "NR",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "NP",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "NL",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "AN",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "NC",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "NZ",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "XL",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "NI",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "NE",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "NG",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "NF",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "NO",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "OM",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "PK",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "PA",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "PG",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "PY",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "PE",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "PH",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "PN",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "PL",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "PT",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "PR",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "QA",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "RE",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "RO",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "RU",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "RW",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "AS",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "SM",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "ST",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "SA",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "SN",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "RS",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "SC",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "SG",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "SK",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "SI",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "SB",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "SO",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "ZA",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "ES",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "XG",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "SJ",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "LK",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "KN",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "SH",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "LC",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "PM",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "VC",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "SD",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "SR",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "SE",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "CH",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "TW",
+      "zone_code": "Taiwan",
+      "novsn_zone_code": "F"
+    },
+    {
+      "country_code": "TJ",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "TZ",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "TH",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "TP",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "TG",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "TO",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "VG",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "TT",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "XB",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "TN",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "TR",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "TM",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "TC",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "TV",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "UG",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "UA",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "AE",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "GB",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "US",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "UY",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "UZ",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "VU",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "VA",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "VE",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "VN",
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "country_code": "VI",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "XM",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "WF",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "WS",
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "country_code": "ZM",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "country_code": "ZW",
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    }
+  ],
+  "source_rows": [
+    {
+      "seq": 1,
+      "page": 1,
+      "code": "AF",
+      "name_tc": "阿富汗",
+      "name_en": "AFGHANISTAN",
+      "canonical_code": "AF",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 2,
+      "page": 1,
+      "code": "AL",
+      "name_tc": "阿爾巴尼亞",
+      "name_en": "ALBANIA",
+      "canonical_code": "AL",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 3,
+      "page": 1,
+      "code": "DZ",
+      "name_tc": "阿爾及利亞",
+      "name_en": "ALGERIA",
+      "canonical_code": "DZ",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 4,
+      "page": 1,
+      "code": "AD",
+      "name_tc": "安道爾",
+      "name_en": "ANDORRA",
+      "canonical_code": "AD",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 5,
+      "page": 1,
+      "code": "AO",
+      "name_tc": "安哥拉",
+      "name_en": "ANGOLA",
+      "canonical_code": "AO",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 6,
+      "page": 1,
+      "code": "AI",
+      "name_tc": "安圭拉島",
+      "name_en": "ANGUILLA",
+      "canonical_code": "AI",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 7,
+      "page": 1,
+      "code": "AG",
+      "name_tc": "安提瓜及巴布達",
+      "name_en": "ANTIGUA AND BARBUDA",
+      "canonical_code": "AG",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 8,
+      "page": 1,
+      "code": "AR",
+      "name_tc": "阿根廷",
+      "name_en": "ARGENTINA",
+      "canonical_code": "AR",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 9,
+      "page": 1,
+      "code": "AM",
+      "name_tc": "亞美利亞",
+      "name_en": "ARMENIA",
+      "canonical_code": "AM",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 10,
+      "page": 1,
+      "code": "AW",
+      "name_tc": "阿魯巴島",
+      "name_en": "ARUBA",
+      "canonical_code": "AW",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 11,
+      "page": 1,
+      "code": "XD",
+      "name_tc": "阿森松",
+      "name_en": "ASCENSION",
+      "canonical_code": "XD",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 12,
+      "page": 1,
+      "code": "AU",
+      "name_tc": "澳大利亞(澳洲)",
+      "name_en": "AUSTRALIA",
+      "canonical_code": "AU",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 13,
+      "page": 1,
+      "code": "AT",
+      "name_tc": "奧地利",
+      "name_en": "AUSTRIA",
+      "canonical_code": "AT",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 14,
+      "page": 1,
+      "code": "AZ",
+      "name_tc": "阿塞拜疆",
+      "name_en": "AZERBAIJAN",
+      "canonical_code": "AZ",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 15,
+      "page": 1,
+      "code": "XH",
+      "name_tc": "亞速爾",
+      "name_en": "AZORES",
+      "canonical_code": "XH",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 16,
+      "page": 1,
+      "code": "BS",
+      "name_tc": "巴哈馬",
+      "name_en": "BAHAMAS",
+      "canonical_code": "BS",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 17,
+      "page": 1,
+      "code": "BH",
+      "name_tc": "巴林(王國)",
+      "name_en": "BAHRAIN (KINGDOM OF)",
+      "canonical_code": "BH",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 18,
+      "page": 1,
+      "code": "XJ",
+      "name_tc": "巴利阿里群島",
+      "name_en": "BALEARIC ISLANDS",
+      "canonical_code": "XJ",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 19,
+      "page": 1,
+      "code": "BD",
+      "name_tc": "孟加拉",
+      "name_en": "BANGLADESH",
+      "canonical_code": "BD",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 20,
+      "page": 1,
+      "code": "BB",
+      "name_tc": "巴巴多斯",
+      "name_en": "BARBADOS",
+      "canonical_code": "BB",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 21,
+      "page": 1,
+      "code": "BY",
+      "name_tc": "白俄羅斯",
+      "name_en": "BELARUS",
+      "canonical_code": "BY",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 22,
+      "page": 1,
+      "code": "BE",
+      "name_tc": "比利時",
+      "name_en": "BELGIUM",
+      "canonical_code": "BE",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 23,
+      "page": 1,
+      "code": "BZ",
+      "name_tc": "伯利茲",
+      "name_en": "BELIZE",
+      "canonical_code": "BZ",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 24,
+      "page": 1,
+      "code": "BJ",
+      "name_tc": "貝寧",
+      "name_en": "BENIN",
+      "canonical_code": "BJ",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 25,
+      "page": 1,
+      "code": "BM",
+      "name_tc": "百慕達",
+      "name_en": "BERMUDA",
+      "canonical_code": "BM",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 26,
+      "page": 1,
+      "code": "BT",
+      "name_tc": "不丹",
+      "name_en": "BHUTAN",
+      "canonical_code": "BT",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 27,
+      "page": 1,
+      "code": "BO",
+      "name_tc": "玻利維亞",
+      "name_en": "BOLIVIA",
+      "canonical_code": "BO",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 28,
+      "page": 1,
+      "code": "BA",
+      "name_tc": "波斯尼亞 - 黑塞哥維那",
+      "name_en": "BOSNIA AND HERZEGOVINA",
+      "canonical_code": "BA",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 29,
+      "page": 1,
+      "code": "BW",
+      "name_tc": "博茨瓦納",
+      "name_en": "BOTSWANA",
+      "canonical_code": "BW",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 30,
+      "page": 1,
+      "code": "BR",
+      "name_tc": "巴西",
+      "name_en": "BRAZIL",
+      "canonical_code": "BR",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 31,
+      "page": 1,
+      "code": "BN",
+      "name_tc": "文萊",
+      "name_en": "BRUNEI DARUSSALAM",
+      "canonical_code": "BN",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 32,
+      "page": 1,
+      "code": "BG",
+      "name_tc": "保加利亞(共和國)",
+      "name_en": "BULGARIA (REP.)",
+      "canonical_code": "BG",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 33,
+      "page": 1,
+      "code": "BF",
+      "name_tc": "布基納法索",
+      "name_en": "BURKINA FASO",
+      "canonical_code": "BF",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 34,
+      "page": 1,
+      "code": "BI",
+      "name_tc": "布隆迪",
+      "name_en": "BURUNDI",
+      "canonical_code": "BI",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 35,
+      "page": 1,
+      "code": "KH",
+      "name_tc": "柬埔寨",
+      "name_en": "CAMBODIA",
+      "canonical_code": "KH",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 36,
+      "page": 1,
+      "code": "CM",
+      "name_tc": "喀麥隆",
+      "name_en": "CAMEROON",
+      "canonical_code": "CM",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 37,
+      "page": 1,
+      "code": "CA",
+      "name_tc": "加拿大",
+      "name_en": "CANADA",
+      "canonical_code": "CA",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 38,
+      "page": 1,
+      "code": "XA",
+      "name_tc": "加那利群島",
+      "name_en": "CANARY ISLANDS",
+      "canonical_code": "XA",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 39,
+      "page": 1,
+      "code": "CV",
+      "name_tc": "佛得角",
+      "name_en": "CAPE VERDE",
+      "canonical_code": "CV",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 40,
+      "page": 1,
+      "code": "XK",
+      "name_tc": "加羅林群島",
+      "name_en": "CAROLINE ISLANDS",
+      "canonical_code": "XK",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 41,
+      "page": 1,
+      "code": "KY",
+      "name_tc": "開曼群島",
+      "name_en": "CAYMAN ISLANDS",
+      "canonical_code": "KY",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 42,
+      "page": 1,
+      "code": "CF",
+      "name_tc": "中非共和國",
+      "name_en": "CENTRAL AFRICAN REP.",
+      "canonical_code": "CF",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 43,
+      "page": 1,
+      "code": "TD",
+      "name_tc": "乍得",
+      "name_en": "CHAD",
+      "canonical_code": "TD",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 44,
+      "page": 1,
+      "code": "CL",
+      "name_tc": "智利",
+      "name_en": "CHILE",
+      "canonical_code": "CL",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 45,
+      "page": 1,
+      "code": "CN",
+      "name_tc": "中國內地 空郵",
+      "name_en": "CHINA, MAINLAND",
+      "canonical_code": "CN",
+      "exclusion_reason": null,
+      "zone_code": "CN - Airmail",
+      "novsn_zone_code": "F"
+    },
+    {
+      "seq": 46,
+      "page": 1,
+      "code": "CNS",
+      "name_tc": "中國內地 平郵",
+      "name_en": "CHINA, MAINLAND",
+      "canonical_code": "CN",
+      "exclusion_reason": "service_duplicate",
+      "zone_code": "CN - Surface",
+      "novsn_zone_code": "B"
+    },
+    {
+      "seq": 47,
+      "page": 1,
+      "code": "CX",
+      "name_tc": "聖誕島",
+      "name_en": "CHRISTMAS ISLAND",
+      "canonical_code": "CX",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 48,
+      "page": 1,
+      "code": "CC",
+      "name_tc": "科科斯群島",
+      "name_en": "COCOS (KEELING) ISLANDS",
+      "canonical_code": "CC",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 49,
+      "page": 1,
+      "code": "CO",
+      "name_tc": "哥倫比亞",
+      "name_en": "COLOMBIA",
+      "canonical_code": "CO",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 50,
+      "page": 1,
+      "code": "KM",
+      "name_tc": "科摩羅",
+      "name_en": "COMOROS",
+      "canonical_code": "KM",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 51,
+      "page": 1,
+      "code": "CG",
+      "name_tc": "剛果(共和國)",
+      "name_en": "CONGO (REP.)",
+      "canonical_code": "CG",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 52,
+      "page": 1,
+      "code": "CK",
+      "name_tc": "庫克群島",
+      "name_en": "COOK ISLANDS",
+      "canonical_code": "CK",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 53,
+      "page": 1,
+      "code": "XF",
+      "name_tc": "科西嘉島",
+      "name_en": "CORSICA",
+      "canonical_code": "XF",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 54,
+      "page": 1,
+      "code": "CR",
+      "name_tc": "哥斯達黎加",
+      "name_en": "COSTA RICA",
+      "canonical_code": "CR",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 55,
+      "page": 1,
+      "code": "CI",
+      "name_tc": "象牙海岸(共和國)",
+      "name_en": "CÔTE D'IVOIRE (REP.)",
+      "canonical_code": "CI",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 56,
+      "page": 1,
+      "code": "HR",
+      "name_tc": "克羅地亞",
+      "name_en": "CROATIA",
+      "canonical_code": "HR",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 57,
+      "page": 1,
+      "code": "CU",
+      "name_tc": "古巴",
+      "name_en": "CUBA",
+      "canonical_code": "CU",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 58,
+      "page": 2,
+      "code": "CY",
+      "name_tc": "塞浦路斯",
+      "name_en": "CYPRUS",
+      "canonical_code": "CY",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 59,
+      "page": 2,
+      "code": "CZ",
+      "name_tc": "捷克共和國",
+      "name_en": "CZECH REP.",
+      "canonical_code": "CZ",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 60,
+      "page": 2,
+      "code": "CD",
+      "name_tc": "剛果民主共和國",
+      "name_en": "DEMOCRATIC REPUBLIC OF THE CONGO",
+      "canonical_code": "CD",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 61,
+      "page": 2,
+      "code": "DK",
+      "name_tc": "丹麥",
+      "name_en": "DENMARK",
+      "canonical_code": "DK",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 62,
+      "page": 2,
+      "code": "DJ",
+      "name_tc": "吉布提",
+      "name_en": "DJIBOUTI",
+      "canonical_code": "DJ",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 63,
+      "page": 2,
+      "code": "DM",
+      "name_tc": "多米尼加",
+      "name_en": "DOMINICA",
+      "canonical_code": "DM",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 64,
+      "page": 2,
+      "code": "DO",
+      "name_tc": "多米尼加共和國",
+      "name_en": "DOMINICAN REPUBLIC",
+      "canonical_code": "DO",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 65,
+      "page": 2,
+      "code": "EC",
+      "name_tc": "厄瓜多爾",
+      "name_en": "ECUADOR",
+      "canonical_code": "EC",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 66,
+      "page": 2,
+      "code": "EG",
+      "name_tc": "埃及",
+      "name_en": "EGYPT",
+      "canonical_code": "EG",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 67,
+      "page": 2,
+      "code": "SV",
+      "name_tc": "薩爾瓦多",
+      "name_en": "EL SALVADOR",
+      "canonical_code": "SV",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 68,
+      "page": 2,
+      "code": "GQ",
+      "name_tc": "赤道幾內亞",
+      "name_en": "EQUATORIAL GUINEA",
+      "canonical_code": "GQ",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 69,
+      "page": 2,
+      "code": "ER",
+      "name_tc": "厄立特里亞",
+      "name_en": "ERITREA",
+      "canonical_code": "ER",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 70,
+      "page": 2,
+      "code": "EE",
+      "name_tc": "愛沙尼亞",
+      "name_en": "ESTONIA",
+      "canonical_code": "EE",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 71,
+      "page": 2,
+      "code": "SZ",
+      "name_tc": "斯威士蘭",
+      "name_en": "ESWATINI",
+      "canonical_code": "SZ",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 72,
+      "page": 2,
+      "code": "ET",
+      "name_tc": "埃塞俄比亞",
+      "name_en": "ETHIOPIA",
+      "canonical_code": "ET",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 73,
+      "page": 2,
+      "code": "FK",
+      "name_tc": "福克蘭群島、南喬治亞地區及南桑威奇群島",
+      "name_en": "FALKLAND ISLANDS AND THE TERRITORY OF SOUTH GEORGIA AND SOUTH SANDWICH ISLANDS",
+      "canonical_code": "FK",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 74,
+      "page": 2,
+      "code": "FO",
+      "name_tc": "法羅群島",
+      "name_en": "FAROE ISLANDS",
+      "canonical_code": "FO",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 75,
+      "page": 2,
+      "code": "FJ",
+      "name_tc": "斐濟",
+      "name_en": "FIJI",
+      "canonical_code": "FJ",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 76,
+      "page": 2,
+      "code": "FI",
+      "name_tc": "芬蘭",
+      "name_en": "FINLAND",
+      "canonical_code": "FI",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 77,
+      "page": 2,
+      "code": "FR",
+      "name_tc": "法國",
+      "name_en": "FRANCE",
+      "canonical_code": "FR",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 78,
+      "page": 2,
+      "code": "GF",
+      "name_tc": "法屬圭亞那",
+      "name_en": "FRENCH GUIANA",
+      "canonical_code": "GF",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 79,
+      "page": 2,
+      "code": "PF",
+      "name_tc": "法屬波利尼西亞",
+      "name_en": "FRENCH POLYNESIA",
+      "canonical_code": "PF",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 80,
+      "page": 2,
+      "code": "GA",
+      "name_tc": "加蓬",
+      "name_en": "GABON",
+      "canonical_code": "GA",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 81,
+      "page": 2,
+      "code": "GM",
+      "name_tc": "岡比亞",
+      "name_en": "GAMBIA",
+      "canonical_code": "GM",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 82,
+      "page": 2,
+      "code": "XE",
+      "name_tc": "加沙及汗尤尼斯",
+      "name_en": "GAZA AND KHAN YUNIS",
+      "canonical_code": "XE",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 83,
+      "page": 2,
+      "code": "GE",
+      "name_tc": "格魯吉亞",
+      "name_en": "GEORGIA",
+      "canonical_code": "GE",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 84,
+      "page": 2,
+      "code": "DE",
+      "name_tc": "德國",
+      "name_en": "GERMANY",
+      "canonical_code": "DE",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 85,
+      "page": 2,
+      "code": "GH",
+      "name_tc": "加納",
+      "name_en": "GHANA",
+      "canonical_code": "GH",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 86,
+      "page": 2,
+      "code": "GI",
+      "name_tc": "直布羅陀",
+      "name_en": "GIBRALTAR",
+      "canonical_code": "GI",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 87,
+      "page": 2,
+      "code": "GR",
+      "name_tc": "希臘",
+      "name_en": "GREECE",
+      "canonical_code": "GR",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 88,
+      "page": 2,
+      "code": "GL",
+      "name_tc": "格陵蘭",
+      "name_en": "GREENLAND",
+      "canonical_code": "GL",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 89,
+      "page": 2,
+      "code": "GD",
+      "name_tc": "格林納達",
+      "name_en": "GRENADA",
+      "canonical_code": "GD",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 90,
+      "page": 2,
+      "code": "GP",
+      "name_tc": "瓜德羅普島 (法屬西印度群島)",
+      "name_en": "GUADELOUPE (FRENCH WEST INDIES)",
+      "canonical_code": "GP",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 91,
+      "page": 2,
+      "code": "GU",
+      "name_tc": "關島",
+      "name_en": "GUAM",
+      "canonical_code": "GU",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 92,
+      "page": 2,
+      "code": "GT",
+      "name_tc": "危地馬拉",
+      "name_en": "GUATEMALA",
+      "canonical_code": "GT",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 93,
+      "page": 2,
+      "code": "GN",
+      "name_tc": "幾內亞",
+      "name_en": "GUINEA",
+      "canonical_code": "GN",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 94,
+      "page": 2,
+      "code": "GW",
+      "name_tc": "幾內亞比紹",
+      "name_en": "GUINEA-BISSAU",
+      "canonical_code": "GW",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 95,
+      "page": 2,
+      "code": "GY",
+      "name_tc": "圭亞那",
+      "name_en": "GUYANA",
+      "canonical_code": "GY",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 96,
+      "page": 2,
+      "code": "HT",
+      "name_tc": "海地",
+      "name_en": "HAITI",
+      "canonical_code": "HT",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 97,
+      "page": 2,
+      "code": "HN",
+      "name_tc": "洪都拉斯(共和國)",
+      "name_en": "HONDURAS (REP.)",
+      "canonical_code": "HN",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 98,
+      "page": 2,
+      "code": "HK",
+      "name_tc": "香港",
+      "name_en": "HONG KONG",
+      "canonical_code": "HK",
+      "exclusion_reason": null,
+      "zone_code": "LOCAL",
+      "novsn_zone_code": "A"
+    },
+    {
+      "seq": 99,
+      "page": 2,
+      "code": "HU",
+      "name_tc": "匈牙利",
+      "name_en": "HUNGARY",
+      "canonical_code": "HU",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 100,
+      "page": 2,
+      "code": "IS",
+      "name_tc": "冰島",
+      "name_en": "ICELAND",
+      "canonical_code": "IS",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 101,
+      "page": 2,
+      "code": "IN",
+      "name_tc": "印度",
+      "name_en": "INDIA",
+      "canonical_code": "IN",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 102,
+      "page": 2,
+      "code": "ID",
+      "name_tc": "印度尼西亞",
+      "name_en": "INDONESIA",
+      "canonical_code": "ID",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 103,
+      "page": 2,
+      "code": "IR",
+      "name_tc": "伊朗",
+      "name_en": "IRAN",
+      "canonical_code": "IR",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 104,
+      "page": 2,
+      "code": "IQ",
+      "name_tc": "伊拉克",
+      "name_en": "IRAQ",
+      "canonical_code": "IQ",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 105,
+      "page": 2,
+      "code": "IE",
+      "name_tc": "愛爾蘭",
+      "name_en": "IRELAND",
+      "canonical_code": "IE",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 106,
+      "page": 2,
+      "code": "IL",
+      "name_tc": "以色列",
+      "name_en": "ISRAEL",
+      "canonical_code": "IL",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 107,
+      "page": 2,
+      "code": "IT",
+      "name_tc": "意大利",
+      "name_en": "ITALY",
+      "canonical_code": "IT",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 108,
+      "page": 2,
+      "code": "JM",
+      "name_tc": "牙買加",
+      "name_en": "JAMAICA",
+      "canonical_code": "JM",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 109,
+      "page": 2,
+      "code": "JP",
+      "name_tc": "日本",
+      "name_en": "JAPAN",
+      "canonical_code": "JP",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 110,
+      "page": 2,
+      "code": "JO",
+      "name_tc": "約旦",
+      "name_en": "JORDAN",
+      "canonical_code": "JO",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 111,
+      "page": 2,
+      "code": "KZ",
+      "name_tc": "哈薩克",
+      "name_en": "KAZAKHSTAN",
+      "canonical_code": "KZ",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 112,
+      "page": 2,
+      "code": "KE",
+      "name_tc": "肯尼亞",
+      "name_en": "KENYA",
+      "canonical_code": "KE",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 113,
+      "page": 2,
+      "code": "KI",
+      "name_tc": "基里巴斯",
+      "name_en": "KIRIBATI",
+      "canonical_code": "KI",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 114,
+      "page": 3,
+      "code": "KP",
+      "name_tc": "北韓",
+      "name_en": "KOREA, NORTH",
+      "canonical_code": "KP",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 115,
+      "page": 3,
+      "code": "KR",
+      "name_tc": "南韓",
+      "name_en": "KOREA, SOUTH",
+      "canonical_code": "KR",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 116,
+      "page": 3,
+      "code": "XO",
+      "name_tc": "科索沃",
+      "name_en": "KOSOVO",
+      "canonical_code": "XO",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 117,
+      "page": 3,
+      "code": "KW",
+      "name_tc": "科威特",
+      "name_en": "KUWAIT",
+      "canonical_code": "KW",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 118,
+      "page": 3,
+      "code": "KG",
+      "name_tc": "吉爾吉斯",
+      "name_en": "KYRGYZSTAN",
+      "canonical_code": "KG",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 119,
+      "page": 3,
+      "code": "LA",
+      "name_tc": "老撾人民民主共和國",
+      "name_en": "LAO PEOPLE'S DEM. REP.",
+      "canonical_code": "LA",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 120,
+      "page": 3,
+      "code": "LV",
+      "name_tc": "拉脫維亞",
+      "name_en": "LATVIA",
+      "canonical_code": "LV",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 121,
+      "page": 3,
+      "code": "LB",
+      "name_tc": "黎巴嫩",
+      "name_en": "LEBANON",
+      "canonical_code": "LB",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 122,
+      "page": 3,
+      "code": "LS",
+      "name_tc": "萊索托",
+      "name_en": "LESOTHO",
+      "canonical_code": "LS",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 123,
+      "page": 3,
+      "code": "LI",
+      "name_tc": "列支敦士登",
+      "name_en": "LIECHTENSTEIN",
+      "canonical_code": "LI",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 124,
+      "page": 3,
+      "code": "LT",
+      "name_tc": "立陶宛",
+      "name_en": "LITHUANIA",
+      "canonical_code": "LT",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 125,
+      "page": 3,
+      "code": "LU",
+      "name_tc": "盧森堡",
+      "name_en": "LUXEMBOURG",
+      "canonical_code": "LU",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 126,
+      "page": 3,
+      "code": "MO",
+      "name_tc": "澳門",
+      "name_en": "MACAU",
+      "canonical_code": "MO",
+      "exclusion_reason": null,
+      "zone_code": "Macau - Surface",
+      "novsn_zone_code": "M"
+    },
+    {
+      "seq": 127,
+      "page": 3,
+      "code": "MK",
+      "name_tc": "馬其頓",
+      "name_en": "MACEDONIA",
+      "canonical_code": "MK",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 128,
+      "page": 3,
+      "code": "MG",
+      "name_tc": "馬達加斯加",
+      "name_en": "MADAGASCAR",
+      "canonical_code": "MG",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 129,
+      "page": 3,
+      "code": "XI",
+      "name_tc": "馬德拉",
+      "name_en": "MADEIRA",
+      "canonical_code": "XI",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 130,
+      "page": 3,
+      "code": "MW",
+      "name_tc": "馬拉維",
+      "name_en": "MALAWI",
+      "canonical_code": "MW",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 131,
+      "page": 3,
+      "code": "MY",
+      "name_tc": "馬來西亞",
+      "name_en": "MALAYSIA",
+      "canonical_code": "MY",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 132,
+      "page": 3,
+      "code": "MV",
+      "name_tc": "馬爾代夫",
+      "name_en": "MALDIVES",
+      "canonical_code": "MV",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 133,
+      "page": 3,
+      "code": "ML",
+      "name_tc": "馬里",
+      "name_en": "MALI",
+      "canonical_code": "ML",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 134,
+      "page": 3,
+      "code": "MT",
+      "name_tc": "馬爾他",
+      "name_en": "MALTA",
+      "canonical_code": "MT",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 135,
+      "page": 3,
+      "code": "MP",
+      "name_tc": "馬里亞納群島",
+      "name_en": "MARIANA ISLANDS",
+      "canonical_code": "MP",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 136,
+      "page": 3,
+      "code": "MH",
+      "name_tc": "馬紹爾群島",
+      "name_en": "MARSHALL ISLANDS",
+      "canonical_code": "MH",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 137,
+      "page": 3,
+      "code": "MQ",
+      "name_tc": "馬提尼克島 (法屬西印度群島)",
+      "name_en": "MARTINIQUE (FRENCH WEST INDIES)",
+      "canonical_code": "MQ",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 138,
+      "page": 3,
+      "code": "MR",
+      "name_tc": "毛里塔尼亞",
+      "name_en": "MAURITANIA",
+      "canonical_code": "MR",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 139,
+      "page": 3,
+      "code": "MU",
+      "name_tc": "毛里求斯",
+      "name_en": "MAURITIUS",
+      "canonical_code": "MU",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 140,
+      "page": 3,
+      "code": "MX",
+      "name_tc": "墨西哥",
+      "name_en": "MEXICO",
+      "canonical_code": "MX",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 141,
+      "page": 3,
+      "code": "FM",
+      "name_tc": "密克羅尼西亞聯邦共和國",
+      "name_en": "MICRONESIA (FEDERATED STATES OF)",
+      "canonical_code": "FM",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 142,
+      "page": 3,
+      "code": "MD",
+      "name_tc": "摩爾多瓦",
+      "name_en": "MOLDOVA",
+      "canonical_code": "MD",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 143,
+      "page": 3,
+      "code": "MC",
+      "name_tc": "摩納哥",
+      "name_en": "MONACO",
+      "canonical_code": "MC",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 144,
+      "page": 3,
+      "code": "MN",
+      "name_tc": "蒙古",
+      "name_en": "MONGOLIA",
+      "canonical_code": "MN",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 145,
+      "page": 3,
+      "code": "ME",
+      "name_tc": "黑山",
+      "name_en": "MONTENEGRO",
+      "canonical_code": "ME",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 146,
+      "page": 3,
+      "code": "MS",
+      "name_tc": "蒙特塞拉特",
+      "name_en": "MONTSERRAT",
+      "canonical_code": "MS",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 147,
+      "page": 3,
+      "code": "MA",
+      "name_tc": "摩洛哥",
+      "name_en": "MOROCCO",
+      "canonical_code": "MA",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 148,
+      "page": 3,
+      "code": "MZ",
+      "name_tc": "莫桑比克",
+      "name_en": "MOZAMBIQUE",
+      "canonical_code": "MZ",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 149,
+      "page": 3,
+      "code": "MM",
+      "name_tc": "緬甸",
+      "name_en": "MYANMAR",
+      "canonical_code": "MM",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 150,
+      "page": 3,
+      "code": "NA",
+      "name_tc": "納米比亞",
+      "name_en": "NAMIBIA",
+      "canonical_code": "NA",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 151,
+      "page": 3,
+      "code": "NR",
+      "name_tc": "瑙魯",
+      "name_en": "NAURU",
+      "canonical_code": "NR",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 152,
+      "page": 3,
+      "code": "NP",
+      "name_tc": "尼泊爾",
+      "name_en": "NEPAL",
+      "canonical_code": "NP",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 153,
+      "page": 3,
+      "code": "NL",
+      "name_tc": "荷蘭",
+      "name_en": "NETHERLANDS",
+      "canonical_code": "NL",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 154,
+      "page": 3,
+      "code": "AN",
+      "name_tc": "荷屬安的列斯",
+      "name_en": "NETHERLANDS ANTILLES",
+      "canonical_code": "AN",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 155,
+      "page": 3,
+      "code": "NC",
+      "name_tc": "新喀里多尼亞",
+      "name_en": "NEW CALEDONIA",
+      "canonical_code": "NC",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 156,
+      "page": 3,
+      "code": "NZ",
+      "name_tc": "新西蘭",
+      "name_en": "NEW ZEALAND",
+      "canonical_code": "NZ",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 157,
+      "page": 3,
+      "code": "XL",
+      "name_tc": "新西蘭屬土島嶼",
+      "name_en": "NEW ZEALAND ISLANDS TERRITORIES",
+      "canonical_code": "XL",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 158,
+      "page": 3,
+      "code": "NI",
+      "name_tc": "尼加拉瓜",
+      "name_en": "NICARAGUA",
+      "canonical_code": "NI",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 159,
+      "page": 3,
+      "code": "NE",
+      "name_tc": "尼日爾",
+      "name_en": "NIGER",
+      "canonical_code": "NE",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 160,
+      "page": 3,
+      "code": "NG",
+      "name_tc": "尼日利亞",
+      "name_en": "NIGERIA",
+      "canonical_code": "NG",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 161,
+      "page": 3,
+      "code": "NF",
+      "name_tc": "諾褔克島",
+      "name_en": "NORFOLK ISLAND",
+      "canonical_code": "NF",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 162,
+      "page": 3,
+      "code": "NO",
+      "name_tc": "挪威",
+      "name_en": "NORWAY",
+      "canonical_code": "NO",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 163,
+      "page": 3,
+      "code": "OM",
+      "name_tc": "阿曼",
+      "name_en": "OMAN",
+      "canonical_code": "OM",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 164,
+      "page": 3,
+      "code": "PK",
+      "name_tc": "巴基斯坦",
+      "name_en": "PAKISTAN",
+      "canonical_code": "PK",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 165,
+      "page": 3,
+      "code": "PA",
+      "name_tc": "巴拿馬(共和國)",
+      "name_en": "PANAMA (REP.)",
+      "canonical_code": "PA",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 166,
+      "page": 3,
+      "code": "PG",
+      "name_tc": "巴布亞新幾內亞",
+      "name_en": "PAPUA NEW GUINEA",
+      "canonical_code": "PG",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 167,
+      "page": 3,
+      "code": "PY",
+      "name_tc": "巴拉圭",
+      "name_en": "PARAGUAY",
+      "canonical_code": "PY",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 168,
+      "page": 3,
+      "code": "PE",
+      "name_tc": "秘魯",
+      "name_en": "PERU",
+      "canonical_code": "PE",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 169,
+      "page": 3,
+      "code": "PH",
+      "name_tc": "菲律賓",
+      "name_en": "PHILIPPINES",
+      "canonical_code": "PH",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 170,
+      "page": 3,
+      "code": "PN",
+      "name_tc": "皮特凱恩島",
+      "name_en": "PITCAIRN ISLANDS",
+      "canonical_code": "PN",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 171,
+      "page": 4,
+      "code": "PL",
+      "name_tc": "波蘭",
+      "name_en": "POLAND",
+      "canonical_code": "PL",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 172,
+      "page": 4,
+      "code": "PT",
+      "name_tc": "葡萄牙",
+      "name_en": "PORTUGAL",
+      "canonical_code": "PT",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 173,
+      "page": 4,
+      "code": "PR",
+      "name_tc": "波多黎各",
+      "name_en": "PUERTO RICO",
+      "canonical_code": "PR",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 174,
+      "page": 4,
+      "code": "QA",
+      "name_tc": "卡塔爾",
+      "name_en": "QATAR",
+      "canonical_code": "QA",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 175,
+      "page": 4,
+      "code": "RE",
+      "name_tc": "留尼汪島",
+      "name_en": "RÉUNION",
+      "canonical_code": "RE",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 176,
+      "page": 4,
+      "code": "RO",
+      "name_tc": "羅馬尼亞",
+      "name_en": "ROMANIA",
+      "canonical_code": "RO",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 177,
+      "page": 4,
+      "code": "RU",
+      "name_tc": "俄羅斯 (俄羅斯聯邦)",
+      "name_en": "RUSSIA (RUSSIAN FEDERATION)",
+      "canonical_code": "RU",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 178,
+      "page": 4,
+      "code": "RW",
+      "name_tc": "盧旺達 (共和國)",
+      "name_en": "RWANDA (RÉP.)",
+      "canonical_code": "RW",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 179,
+      "page": 4,
+      "code": "AS",
+      "name_tc": "薩摩亞(美國屬土)",
+      "name_en": "SAMOA (U.S.A. TERRITORY)",
+      "canonical_code": "AS",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 180,
+      "page": 4,
+      "code": "SM",
+      "name_tc": "聖馬力諾",
+      "name_en": "SAN MARINO",
+      "canonical_code": "SM",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 181,
+      "page": 4,
+      "code": "ST",
+      "name_tc": "聖多美和普林西比",
+      "name_en": "SAO TOME AND PRINCIPE",
+      "canonical_code": "ST",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 182,
+      "page": 4,
+      "code": "SA",
+      "name_tc": "沙地阿拉伯",
+      "name_en": "SAUDI ARABIA",
+      "canonical_code": "SA",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 183,
+      "page": 4,
+      "code": "SN",
+      "name_tc": "塞內加爾",
+      "name_en": "SENEGAL",
+      "canonical_code": "SN",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 184,
+      "page": 4,
+      "code": "RS",
+      "name_tc": "塞爾維亞",
+      "name_en": "SERBIA",
+      "canonical_code": "RS",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 185,
+      "page": 4,
+      "code": "SC",
+      "name_tc": "塞舌爾",
+      "name_en": "SEYCHELLES",
+      "canonical_code": "SC",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 186,
+      "page": 4,
+      "code": "SG",
+      "name_tc": "新加坡",
+      "name_en": "SINGAPORE",
+      "canonical_code": "SG",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 187,
+      "page": 4,
+      "code": "SK",
+      "name_tc": "斯洛伐克",
+      "name_en": "SLOVAKIA",
+      "canonical_code": "SK",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 188,
+      "page": 4,
+      "code": "SI",
+      "name_tc": "斯洛文尼亞",
+      "name_en": "SLOVENIA",
+      "canonical_code": "SI",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 189,
+      "page": 4,
+      "code": "SB",
+      "name_tc": "所羅門群島",
+      "name_en": "SOLOMON ISLANDS",
+      "canonical_code": "SB",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 190,
+      "page": 4,
+      "code": "SO",
+      "name_tc": "索馬里",
+      "name_en": "SOMALIA",
+      "canonical_code": "SO",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 191,
+      "page": 4,
+      "code": "ZA",
+      "name_tc": "南非",
+      "name_en": "SOUTH AFRICA",
+      "canonical_code": "ZA",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 192,
+      "page": 4,
+      "code": "ES",
+      "name_tc": "西班牙",
+      "name_en": "SPAIN",
+      "canonical_code": "ES",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 193,
+      "page": 4,
+      "code": "XG",
+      "name_tc": "北非西班牙屬土",
+      "name_en": "SPANISH TERRITORIES OF NORTH AFRICA",
+      "canonical_code": "XG",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 194,
+      "page": 4,
+      "code": "SJ",
+      "name_tc": "斯匹次卑爾根群島",
+      "name_en": "SPITSBERGEN",
+      "canonical_code": "SJ",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 195,
+      "page": 4,
+      "code": "LK",
+      "name_tc": "斯里蘭卡",
+      "name_en": "SRI LANKA",
+      "canonical_code": "LK",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 196,
+      "page": 4,
+      "code": "KN",
+      "name_tc": "聖克里斯托佛島及尼維斯島",
+      "name_en": "ST. CHRISTOPHER (ST. KITTS) AND NEVIS",
+      "canonical_code": "KN",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 197,
+      "page": 4,
+      "code": "SH",
+      "name_tc": "聖赫勒拿島",
+      "name_en": "ST. HELENA",
+      "canonical_code": "SH",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 198,
+      "page": 4,
+      "code": "LC",
+      "name_tc": "聖盧西亞",
+      "name_en": "ST. LUCIA",
+      "canonical_code": "LC",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 199,
+      "page": 4,
+      "code": "PM",
+      "name_tc": "聖皮埃爾和密克隆群島",
+      "name_en": "ST. PIERRE AND MIQUELON",
+      "canonical_code": "PM",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 200,
+      "page": 4,
+      "code": "VC",
+      "name_tc": "聖文森特和格林納丁斯",
+      "name_en": "ST. VINCENT AND THE GRENADINES",
+      "canonical_code": "VC",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 201,
+      "page": 4,
+      "code": "SD",
+      "name_tc": "蘇丹",
+      "name_en": "SUDAN",
+      "canonical_code": "SD",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 202,
+      "page": 4,
+      "code": "SR",
+      "name_tc": "蘇里南",
+      "name_en": "SURINAME",
+      "canonical_code": "SR",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 203,
+      "page": 4,
+      "code": "SE",
+      "name_tc": "瑞典",
+      "name_en": "SWEDEN",
+      "canonical_code": "SE",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 204,
+      "page": 4,
+      "code": "CH",
+      "name_tc": "瑞士",
+      "name_en": "SWITZERLAND",
+      "canonical_code": "CH",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 205,
+      "page": 4,
+      "code": "TW",
+      "name_tc": "台灣",
+      "name_en": "TAIWAN",
+      "canonical_code": "TW",
+      "exclusion_reason": null,
+      "zone_code": "Taiwan",
+      "novsn_zone_code": "F"
+    },
+    {
+      "seq": 206,
+      "page": 4,
+      "code": "TJ",
+      "name_tc": "塔吉克",
+      "name_en": "TAJIKISTAN",
+      "canonical_code": "TJ",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 207,
+      "page": 4,
+      "code": "TZ",
+      "name_tc": "坦桑尼亞(聯合共和國)",
+      "name_en": "TANZANIA (UNITED REP.)",
+      "canonical_code": "TZ",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 208,
+      "page": 4,
+      "code": "TH",
+      "name_tc": "泰國",
+      "name_en": "THAILAND",
+      "canonical_code": "TH",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 209,
+      "page": 4,
+      "code": "TP",
+      "name_tc": "東帝汶(民主共和國)",
+      "name_en": "TIMOR-LESTE (DEM. REP.)",
+      "canonical_code": "TP",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 210,
+      "page": 4,
+      "code": "TG",
+      "name_tc": "多哥",
+      "name_en": "TOGO",
+      "canonical_code": "TG",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 211,
+      "page": 4,
+      "code": "TO",
+      "name_tc": "湯加",
+      "name_en": "TONGA",
+      "canonical_code": "TO",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 212,
+      "page": 4,
+      "code": "VG",
+      "name_tc": "托爾托拉島(英屬處女群島)",
+      "name_en": "TORTOLA (BRITISH VIRGIN ISLANDS)",
+      "canonical_code": "VG",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 213,
+      "page": 4,
+      "code": "TT",
+      "name_tc": "千里達和多巴哥",
+      "name_en": "TRINIDAD AND TOBAGO",
+      "canonical_code": "TT",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 214,
+      "page": 4,
+      "code": "XB",
+      "name_tc": "特里斯坦 - 達庫尼亞島",
+      "name_en": "TRISTAN DA CUNHA",
+      "canonical_code": "XB",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 215,
+      "page": 4,
+      "code": "TN",
+      "name_tc": "突尼斯",
+      "name_en": "TUNISIA",
+      "canonical_code": "TN",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 216,
+      "page": 4,
+      "code": "TR",
+      "name_tc": "土耳其",
+      "name_en": "TURKEY",
+      "canonical_code": "TR",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 217,
+      "page": 4,
+      "code": "TM",
+      "name_tc": "土庫曼",
+      "name_en": "TURKMENISTAN",
+      "canonical_code": "TM",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 218,
+      "page": 4,
+      "code": "TC",
+      "name_tc": "特克斯和凱科斯群島",
+      "name_en": "TURKS AND CAICOS ISLANDS",
+      "canonical_code": "TC",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 219,
+      "page": 4,
+      "code": "TV",
+      "name_tc": "圖瓦盧",
+      "name_en": "TUVALU",
+      "canonical_code": "TV",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 220,
+      "page": 4,
+      "code": "UG",
+      "name_tc": "烏干達",
+      "name_en": "UGANDA",
+      "canonical_code": "UG",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 221,
+      "page": 4,
+      "code": "UA",
+      "name_tc": "烏克蘭",
+      "name_en": "UKRAINE",
+      "canonical_code": "UA",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 222,
+      "page": 4,
+      "code": "AE",
+      "name_tc": "阿拉伯聯合酋長國",
+      "name_en": "UNITED ARAB EMIRATES",
+      "canonical_code": "AE",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 223,
+      "page": 4,
+      "code": "GB",
+      "name_tc": "英國",
+      "name_en": "UNITED KINGDOM",
+      "canonical_code": "GB",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 224,
+      "page": 4,
+      "code": "US",
+      "name_tc": "美國",
+      "name_en": "UNITED STATES OF AMERICA",
+      "canonical_code": "US",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 225,
+      "page": 4,
+      "code": "UY",
+      "name_tc": "烏拉圭",
+      "name_en": "URUGUAY",
+      "canonical_code": "UY",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 226,
+      "page": 4,
+      "code": "UZ",
+      "name_tc": "烏茲別克",
+      "name_en": "UZBEKISTAN",
+      "canonical_code": "UZ",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 227,
+      "page": 4,
+      "code": "VU",
+      "name_tc": "瓦努阿圖",
+      "name_en": "VANUATU",
+      "canonical_code": "VU",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 228,
+      "page": 5,
+      "code": "VA",
+      "name_tc": "梵蒂岡",
+      "name_en": "VATICAN",
+      "canonical_code": "VA",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 229,
+      "page": 5,
+      "code": "VE",
+      "name_tc": "委內瑞拉(玻利瓦爾共和國)",
+      "name_en": "VENEZUELA (BOLIVARIAN REP.)",
+      "canonical_code": "VE",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 230,
+      "page": 5,
+      "code": "VN",
+      "name_tc": "越南",
+      "name_en": "VIET NAM",
+      "canonical_code": "VN",
+      "exclusion_reason": null,
+      "zone_code": "1",
+      "novsn_zone_code": "C"
+    },
+    {
+      "seq": 231,
+      "page": 5,
+      "code": "VI",
+      "name_tc": "美屬處女群島",
+      "name_en": "VIRGIN ISLANDS (U.S.A.)",
+      "canonical_code": "VI",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 232,
+      "page": 5,
+      "code": "XM",
+      "name_tc": "威克島",
+      "name_en": "WAKE ISLAND",
+      "canonical_code": "XM",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 233,
+      "page": 5,
+      "code": "WF",
+      "name_tc": "瓦利斯群島和富圖納群島",
+      "name_en": "WALLIS AND FUTUNA ISLANDS",
+      "canonical_code": "WF",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 234,
+      "page": 5,
+      "code": "WS",
+      "name_tc": "西薩摩亞",
+      "name_en": "WESTERN SAMOA",
+      "canonical_code": "WS",
+      "exclusion_reason": null,
+      "zone_code": "2",
+      "novsn_zone_code": "D"
+    },
+    {
+      "seq": 235,
+      "page": 5,
+      "code": "ZM",
+      "name_tc": "贊比亞",
+      "name_en": "ZAMBIA",
+      "canonical_code": "ZM",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    },
+    {
+      "seq": 236,
+      "page": 5,
+      "code": "ZW",
+      "name_tc": "津巴布韋",
+      "name_en": "ZIMBABWE",
+      "canonical_code": "ZW",
+      "exclusion_reason": null,
+      "zone_code": "3",
+      "novsn_zone_code": "E"
+    }
+  ]
+}

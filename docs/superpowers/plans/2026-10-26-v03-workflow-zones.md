@@ -60,7 +60,7 @@ CURRENT_RELEASE.json; no main merge or formal promotion before new manual accept
 
 ## Ownership / ordered milestones
 
-- [ ] A: independent data worker owns zone_mappings.py, resource JSON,
+- [x] A: independent data worker owns zone_mappings.py, resource JSON,
   tools/import_country_zones.py and new tests/unit/test_zone_mappings.py only.
 - [ ] B: main implementer owns country_reports.py, country_analysis.py,
   country_cases.py and corresponding non-GUI report/job/cases tests.
@@ -89,3 +89,19 @@ Independent per-task and final reviews. Record actual outputs, reviews, timings,
 DB/artifact sizes and remaining blockers here. Private inputs/replays/oracles
 remain only in ignored exports/.tmp; public-only source and aggregate receipts
 may enter Git. Existing v0.2.0 snapshot is the legacy compatibility baseline.
+
+Task A completed: 67 zone tests / 130 combined zone-country tests passed.
+Independent reviewer re-extracted all 236 audit rows and 235 active mappings
+from the pinned PDF, confirmed byte-identical re-import, immutable entries,
+fresh-byte fingerprints and rejection of all 472 coordinated value mutations.
+No important data-task findings. Existing country catalogue/resource unchanged.
+
+Core progress: seven report/case tests and three checkpoint tests failed first;
+new output schema/pins/state3/legacy readers implemented. Initial integrated
+group: 69 passed plus six old column assertions awaiting new contract. After
+updating those assertions with explicit IN/JP/blank zone values, 75 passed in
+18.05s. Independent core review is in progress.
+
+Execution resumed after an automatic-approval service usage-limit interruption;
+the final test-assertion patch had not executed, was verified absent and then
+applied normally after service recovery. No alternative approval bypass used.
