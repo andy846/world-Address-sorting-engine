@@ -6,15 +6,115 @@ import importlib.util
 import json
 from pathlib import Path
 import shutil
-from types import SimpleNamespace
 import tracemalloc
+from collections import Counter
 
 import pytest
 
 from tests.unit.test_retrieve import geo
 from world_address_engine.jobs.country_analysis import analyze_job
-from world_address_engine.io.country_reports import write_country_reports
-from world_address_engine.models import AddressRecord
+from world_address_engine.io.reports import _protect
+
+
+ZONE_IDENTITY = {'version': 'synthetic-zones-1', 'source_sha256': 'a' * 64,
+                 'sha256': 'b' * 64}
+
+
+@pytest.fixture
+def schema2_case(tmp_path):
+    """Literal reports independent of the application writer and zone lookup."""
+    source = tmp_path / 'source.csv'
+    output = tmp_path / 'out'
+    output.mkdir()
+    block = [
+        {'fields': {'Address': 'Public HK', 'Country_Code': 'original'},
+         'code': 'HK', 'status': 'DETERMINED', 'reason': 'EXPLICIT_COUNTRY',
+         'candidates': [], 'zone_code': 'LOCAL', 'novsn_zone_code': 'A'},
+        {'fields': {'Address': '', 'Country_Code': ''}, 'code': None,
+         'status': 'UNRESOLVED', 'reason': 'EMPTY_ADDRESS', 'candidates': [],
+         'zone_code': '', 'novsn_zone_code': ''}]
+    write(source, [['Address', 'Country_Code', '_Benchmark_Cycle', '_Benchmark_Base_Row'],
+                   ['Public HK', 'original', '1', '1'], ['', '', '1', '2']])
+    write(output / 'Classified_Addresses.csv', [
+        ['Address', 'Country_Code', '_Benchmark_Cycle', '_Benchmark_Base_Row',
+         'Country_Code', 'Zone_Code', 'NOVSN_Zone_Code'],
+        ['Public HK', 'original', '1', '1', 'HK', 'LOCAL', 'A'],
+        ['', '', '1', '2', '', '', '']])
+    write(output / 'Country_Diagnostics.csv', [
+        ['Source_Record_No', 'Status', 'Reason', 'Candidates'],
+        ['1', 'DETERMINED', 'EXPLICIT_COUNTRY', ''],
+        ['2', 'UNRESOLVED', 'EMPTY_ADDRESS', '']])
+    write(output / 'Country_Summary.csv', [
+        ['Country_Code', 'Country_Name_TC', 'Country_Name_EN', 'Zone_Code',
+         'NOVSN_Zone_Code', 'Count', 'Percentage'],
+        ['HK', '香港', 'Hong Kong', 'LOCAL', 'A', '1', '50.00'],
+        ['', '', '', '', '', '1', '50.00']])
+    manifest = {
+        'report_schema_version': 2,
+        'generated_columns': ['Country_Code', 'Zone_Code', 'NOVSN_Zone_Code'],
+        'run_status': 'COMPLETE', 'job_kind': 'country-analysis',
+        'data_class': 'COUNTRY_CODE_ESTIMATE', 'total_records': 2,
+        'status_counts': {'DETERMINED': 1, 'INFERRED': 0, 'UNRESOLVED': 1},
+        'destination_counts': {'HK': 1},
+        'run_metadata': {'zone_mapping': dict(ZONE_IDENTITY)},
+        'files': ['Classified_Addresses.csv', 'Country_Summary.csv', 'Country_Diagnostics.csv']}
+    (output / 'Run_Manifest.json').write_text(json.dumps(manifest), encoding='utf8')
+    rehash(source, output)
+    return source, output, block
+
+
+def test_schema2_verifies_literal_reports_against_pinned_zone_pairs(schema2_case):
+    source, output, block = schema2_case
+    assert verifier()(source, output, block, 1)['verified']
+
+
+@pytest.mark.parametrize('filename,index,column,value', [
+    ('Classified_Addresses.csv', 1, -2, 'CN - Airmail'),
+    ('Classified_Addresses.csv', 1, -3, 'JP'),
+    ('Classified_Addresses.csv', 2, -1, 'A'),
+    ('Country_Summary.csv', 1, 3, 'OTHER'),
+    ('Country_Summary.csv', 1, 4, 'F'),
+    ('Country_Summary.csv', 2, 3, 'LOCAL'),
+    ('Country_Summary.csv', 1, 5, '2'),
+    ('Country_Summary.csv', 1, 6, '100.00')])
+def test_schema2_rehashed_zone_and_count_corruption_fails(schema2_case, filename, index, column, value):
+    source, output, block = schema2_case
+    rows = read(output / filename)
+    rows[index][column] = value
+    write(output / filename, rows)
+    rehash(source, output)
+    with pytest.raises(ValueError):
+        verifier()(source, output, block, 1, zone_mapping=ZONE_IDENTITY)
+
+
+@pytest.mark.parametrize('damage', ['schema', 'tail', 'identity', 'identity_version',
+                                    'identity_source', 'missing_identity',
+                                    'oracle_pair', 'blank_known', 'unknown_pair'])
+def test_schema2_requires_explicit_schema_identity_and_complete_oracle(schema2_case, damage):
+    source, output, block = schema2_case
+    path = output / 'Run_Manifest.json'
+    manifest = json.loads(path.read_text(encoding='utf8'))
+    if damage == 'schema':
+        del manifest['report_schema_version']
+    elif damage == 'tail':
+        manifest['generated_columns'] = ['Country_Code']
+    elif damage == 'identity':
+        manifest['run_metadata']['zone_mapping']['sha256'] = 'c' * 64
+    elif damage == 'identity_version':
+        manifest['run_metadata']['zone_mapping']['version'] = 'other'
+    elif damage == 'identity_source':
+        manifest['run_metadata']['zone_mapping']['source_sha256'] = 'c' * 64
+    elif damage == 'missing_identity':
+        del manifest['run_metadata']['zone_mapping']
+    elif damage == 'oracle_pair':
+        del block[0]['zone_code']
+    elif damage == 'blank_known':
+        block[0]['zone_code'] = ''
+    else:
+        block[1]['novsn_zone_code'] = 'A'
+    path.write_text(json.dumps(manifest), encoding='utf8')
+    with pytest.raises(ValueError):
+        verifier()(source, output, block, 1, zone_mapping=ZONE_IDENTITY)
 
 
 def verifier():
@@ -69,6 +169,10 @@ def prepared(tmp_path_factory):
     output = root / 'out'
     manifest = analyze_job(source, output, geo(root),
                            {'address_columns': ['Address']}, batch_size=5)
+    from world_address_engine.data.zone_mappings import load_zone_mappings, zone_values
+    zones = load_zone_mappings()
+    for item in block:
+        item['zone_code'], item['novsn_zone_code'] = zone_values(item['code'], zones)
     assert manifest['status_counts'] == {'DETERMINED': 6, 'INFERRED': 0, 'UNRESOLVED': 6}
     return root, block
 
@@ -153,9 +257,9 @@ def test_rehashed_summary_corruption_is_rejected(case, damage):
     path = output / 'Country_Summary.csv'
     rows = read(path)
     if damage == 'count':
-        rows[1][3] = '7'
+        rows[1][-2] = '7'
     elif damage == 'percent':
-        rows[1][4] = '100.00'
+        rows[1][-1] = '100.00'
     elif damage == 'duplicate':
         rows.append(rows[1])
     elif damage == 'missing_blank':
@@ -230,6 +334,9 @@ def test_wrong_oracle_count_or_schema_cannot_pass(case):
 
 
 def report_fixture(root, block, repeats):
+    """Historical schema 1 fixture, independent of the current schema 2 writer."""
+    block = [{key: value for key, value in item.items()
+              if key not in ('zone_code', 'novsn_zone_code')} for item in block]
     source = root / 'synthetic-direct.csv'
     columns = list(block[0]['fields']) + ['_Benchmark_Cycle', '_Benchmark_Base_Row']
 
@@ -243,20 +350,34 @@ def report_fixture(root, block, repeats):
         writer.writerow(columns)
         writer.writerows(values for _, values in cells())
 
-    def pairs():
-        for number, (item, values) in enumerate(cells(), 1):
-            yield (AddressRecord(number, str(source), None, None,
-                                 dict(zip(columns, values)), '', None),
-                   SimpleNamespace(record_no=number, country_code=item['code'],
-                                   status=item['status'], reason=item['reason'],
-                                   candidates=item['candidates']))
-
     output = root / 'direct-output'
-    catalogue = SimpleNamespace(entries={code: SimpleNamespace(name_en=code, name_tc=code)
-                                         for code in ['JP', 'IN']})
-    write_country_reports(pairs(), output, catalogue,
-                          {'input_sha256': hashlib.sha256(source.read_bytes()).hexdigest()},
-                          original_columns=columns)
+    output.mkdir()
+    write(output / 'Classified_Addresses.csv', [
+        [_protect(key) for key in columns] + ['Country_Code'],
+        *[[_protect(value) for value in values] + [item['code'] or '']
+          for item, values in cells()]])
+    write(output / 'Country_Diagnostics.csv', [
+        ['Source_Record_No', 'Status', 'Reason', 'Candidates'],
+        *[[str(number), item['status'], _protect(item['reason']),
+           _protect(';'.join(item['candidates']))]
+          for number, (item, _) in enumerate(cells(), 1)]])
+    counts = Counter()
+    statuses = dict.fromkeys(['DETERMINED', 'INFERRED', 'UNRESOLVED'], 0)
+    for item, _ in cells():
+        counts[item['code'] or ''] += 1
+        statuses[item['status']] += 1
+    total = repeats * len(block)
+    write(output / 'Country_Summary.csv', [
+        ['Country_Code', 'Country_Name_TC', 'Country_Name_EN', 'Count', 'Percentage'],
+        *[[code, code, code, str(count), f'{count * 100 / total:.2f}']
+          for code, count in sorted(counts.items())]])
+    manifest = {'run_status': 'COMPLETE', 'job_kind': 'country-analysis',
+                'data_class': 'COUNTRY_CODE_ESTIMATE', 'total_records': total,
+                'status_counts': statuses, 'destination_counts': {k: v for k, v in counts.items() if k},
+                'run_metadata': {}, 'files': ['Classified_Addresses.csv', 'Country_Summary.csv',
+                                             'Country_Diagnostics.csv']}
+    (output / 'Run_Manifest.json').write_text(json.dumps(manifest), encoding='utf8')
+    rehash(source, output)
     return source, output
 
 
@@ -274,6 +395,8 @@ def test_inferred_codes_and_long_unicode_multiline_fields_are_preserved(tmp_path
 
 def test_large_repetition_is_streamed_without_retaining_all_rows(tmp_path, prepared):
     _, block = prepared
+    block = [{key: value for key, value in item.items()
+              if key not in ('zone_code', 'novsn_zone_code')} for item in block]
     source, output = report_fixture(tmp_path, block, 2000)
     check = verifier()
     tracemalloc.start()

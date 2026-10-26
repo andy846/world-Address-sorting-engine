@@ -6,11 +6,250 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import shutil
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
 from tests.unit.test_retrieve import geo
 from world_address_engine.jobs.country_analysis import analyze_job
+from tests.unit.test_country_benchmark_verify import schema2_case, read, write, rehash, ZONE_IDENTITY
+
+
+@pytest.fixture
+def synthetic_v2(schema2_case, monkeypatch, tmp_path):
+    """A baseline and data API double; no dependency on the pending writer."""
+    source, baseline, block = schema2_case
+    rows = read(source)
+    write(source, [['Address', 'Note'], *[row[:2] for row in rows[1:]]])
+    rows = read(baseline / 'Classified_Addresses.csv')
+    write(baseline / 'Classified_Addresses.csv', [
+        ['Address', 'Note', 'Country_Code', 'Zone_Code', 'NOVSN_Zone_Code'],
+        *[row[:2] + row[-3:] for row in rows[1:]]])
+    pack = geo(tmp_path)
+    module = tool()
+    from world_address_engine.data.country_codes import load_country_codes
+    from world_address_engine.jobs.country_analysis import _catalogue_metadata
+    manifest_path = baseline / 'Run_Manifest.json'
+    manifest = json.loads(manifest_path.read_text(encoding='utf8'))
+    manifest['run_metadata'].update(
+        rules_version=module.COUNTRY_RULES_VERSION, geo_sha256=module.file_sha256(pack),
+        address_columns=['Address'], hk_regional=None,
+        **_catalogue_metadata(load_country_codes()))
+    manifest_path.write_text(json.dumps(manifest), encoding='utf8')
+    rehash(source, baseline)
+    zones = SimpleNamespace(entries={'HK': object(), 'JP': object()},
+                            version=ZONE_IDENTITY['version'],
+                            source_sha256=ZONE_IDENTITY['source_sha256'],
+                            fingerprint=ZONE_IDENTITY['sha256'])
+    api = ModuleType('world_address_engine.data.zone_mappings')
+    api.load_zone_mappings = lambda: zones
+    def zone_values(code, catalogue=None):
+        if not code:
+            return '', ''
+        return {'HK': ('LOCAL', 'A'), 'JP': ('Japan', 'F')}[code]
+    api.zone_values = zone_values
+    monkeypatch.setitem(sys.modules, api.__name__, api)
+    controls_path = tmp_path / 'controls.json'
+    controls_path.write_text(json.dumps({'schema_version': 1, 'controls': [
+        {'control_id': 'public-hk', 'lines': ['Hong Kong'], 'expected_code': 'HK',
+         'source_url': 'https://example.org/location'}]}), encoding='utf8')
+    return module, source, baseline, pack, controls_path, zones
+
+
+def test_schema2_prepare_pins_identity_and_independent_zone_pairs(synthetic_v2, tmp_path):
+    module, source, baseline, pack, public, _ = synthetic_v2
+    work = tmp_path / 'private'
+    info = module.prepare_workload(source, baseline, public, work, pack, repeats=1, control_rows=0)
+    oracle = json.loads((work / 'oracle.json').read_text(encoding='utf8'))
+    assert info['report_schema_version'] == 2
+    assert info['generated_columns'] == ['Country_Code', 'Zone_Code', 'NOVSN_Zone_Code']
+    assert info['zone_mapping'] == oracle['zone_mapping'] == ZONE_IDENTITY
+    assert [(row['zone_code'], row['novsn_zone_code']) for row in oracle['block']] == [
+        ('LOCAL', 'A'), ('', '')]
+
+
+def test_original_zone_named_fields_survive_without_influencing_generated_zones(synthetic_v2, tmp_path):
+    module, source, baseline, pack, public, _ = synthetic_v2
+    rows = read(source)
+    write(source, [rows[0] + ['Zone_Code', 'NOVSN_Zone_Code'],
+                   *[row + ['=untrusted', 'original'] for row in rows[1:]]])
+    path = baseline / 'Classified_Addresses.csv'
+    rows = read(path)
+    write(path, [rows[0][:-3] + ['Zone_Code', 'NOVSN_Zone_Code'] + rows[0][-3:],
+                 *[row[:-3] + ["'=untrusted", 'original'] + row[-3:] for row in rows[1:]]])
+    rehash(source, baseline)
+    work = tmp_path / 'private'
+    module.prepare_workload(source, baseline, public, work, pack, repeats=1, control_rows=0)
+    oracle = json.loads((work / 'oracle.json').read_text(encoding='utf8'))
+    assert oracle['block'][0]['fields']['Zone_Code'] == '=untrusted'
+    assert oracle['block'][0]['zone_code'] == 'LOCAL'
+    assert oracle['block'][0]['novsn_zone_code'] == 'A'
+    synthetic_run(module, work, baseline, 'full')
+    assert module.verify_workload(work, 'full')['verified']
+
+
+@pytest.mark.parametrize('damage', ['zone', 'unknown_zone', 'identity', 'tail'])
+def test_schema2_baseline_corruption_fails_before_workspace(synthetic_v2, tmp_path, damage):
+    module, source, baseline, pack, public, _ = synthetic_v2
+    if damage in ('zone', 'unknown_zone'):
+        path = baseline / 'Classified_Addresses.csv'
+        rows = read(path)
+        rows[1 if damage == 'zone' else 2][-2] = 'OTHER'
+        write(path, rows)
+        rehash(source, baseline)
+    else:
+        path = baseline / 'Run_Manifest.json'
+        manifest = json.loads(path.read_text(encoding='utf8'))
+        if damage == 'identity':
+            manifest['run_metadata']['zone_mapping']['sha256'] = 'c' * 64
+        else:
+            manifest['generated_columns'] = ['Country_Code']
+        path.write_text(json.dumps(manifest), encoding='utf8')
+    with pytest.raises(ValueError):
+        module.prepare_workload(source, baseline, public, tmp_path / 'private', pack,
+                                repeats=1, control_rows=0)
+    assert not (tmp_path / 'private').exists()
+
+
+def synthetic_run(module, work, baseline, name):
+    output = work / name
+    shutil.copytree(baseline, output)
+    rows = read(work / 'dataset.csv')
+    detail = read(output / 'Classified_Addresses.csv')
+    write(output / 'Classified_Addresses.csv', [rows[0] + detail[0][-3:],
+          *[[module._protect(value) for value in row] + found[-3:]
+            for row, found in zip(rows[1:], detail[1:])]])
+    rehash(work / 'dataset.csv', output)
+    return output
+
+
+@pytest.mark.parametrize('selected', ['full', 'recovery'])
+@pytest.mark.parametrize('key', ['rules_version', 'geo_sha256', 'address_columns',
+                                'catalogue_fingerprint', 'zone_mapping'])
+def test_every_selected_manifest_must_match_pins(synthetic_v2, tmp_path, selected, key):
+    module, source, baseline, pack, public, _ = synthetic_v2
+    work = tmp_path / 'private'
+    module.prepare_workload(source, baseline, public, work, pack, repeats=1, control_rows=0)
+    for name in ('full', 'recovery'):
+        synthetic_run(module, work, baseline, name)
+    path = work / selected / 'Run_Manifest.json'
+    manifest = json.loads(path.read_text(encoding='utf8'))
+    manifest['run_metadata'][key] = {} if key == 'zone_mapping' else 'changed'
+    path.write_text(json.dumps(manifest), encoding='utf8')
+    with pytest.raises(ValueError):
+        module.verify_workload(work, 'full', compare='recovery')
+
+
+def test_verify_uses_pinned_pairs_but_run_rejects_current_mapping_change(synthetic_v2, tmp_path, monkeypatch):
+    module, source, baseline, pack, public, zones = synthetic_v2
+    work = tmp_path / 'private'
+    module.prepare_workload(source, baseline, public, work, pack, repeats=1, control_rows=0)
+    synthetic_run(module, work, baseline, 'full')
+    zones.fingerprint = 'c' * 64
+    def unavailable_lookup(*args):
+        raise AssertionError('verification must use the saved oracle pairs')
+    monkeypatch.setattr(sys.modules['world_address_engine.data.zone_mappings'],
+                        'zone_values', unavailable_lookup)
+    assert module.verify_workload(work, 'full')['verified']
+    with pytest.raises(ValueError, match='zone'):
+        module.run_workload(work, pack, name='new')
+    assert not (work / 'new').exists()
+
+
+def test_all_public_controls_validated_even_when_not_selected(synthetic_v2, tmp_path):
+    module, source, baseline, pack, public, _ = synthetic_v2
+    data = json.loads(public.read_text(encoding='utf8'))
+    data['controls'].append(dict(data['controls'][0], control_id='bad', expected_code='ZZ'))
+    public.write_text(json.dumps(data), encoding='utf8')
+    with pytest.raises(ValueError, match='control'):
+        module.prepare_workload(source, baseline, public, tmp_path / 'private', pack,
+                                repeats=1, control_rows=0)
+    assert not (tmp_path / 'private').exists()
+
+
+def test_unselected_control_label_must_agree_with_classification(synthetic_v2, tmp_path):
+    module, source, baseline, pack, public, _ = synthetic_v2
+    data = json.loads(public.read_text(encoding='utf8'))
+    data['controls'][0]['expected_code'] = 'GB'
+    public.write_text(json.dumps(data), encoding='utf8')
+    with pytest.raises(ValueError, match='control'):
+        module.prepare_workload(source, baseline, public, tmp_path / 'private', pack,
+                                repeats=1, control_rows=0)
+    assert not (tmp_path / 'private').exists()
+
+
+@pytest.mark.parametrize('damage', ['hash', 'source_hash', 'count', 'schema', 'missing_zone'])
+def test_compare_run_is_exhaustively_verified_even_with_identical_csvs(synthetic_v2, tmp_path, damage):
+    module, source, baseline, pack, public, _ = synthetic_v2
+    work = tmp_path / 'private'
+    module.prepare_workload(source, baseline, public, work, pack, repeats=1, control_rows=0)
+    for name in ('full', 'recovery'):
+        synthetic_run(module, work, baseline, name)
+    path = work / 'recovery' / 'Run_Manifest.json'
+    manifest = json.loads(path.read_text(encoding='utf8'))
+    if damage == 'hash':
+        manifest['sha256']['Country_Diagnostics.csv'] = '0' * 64
+    elif damage == 'source_hash':
+        manifest['run_metadata']['input_sha256'] = '0' * 64
+    elif damage == 'count':
+        manifest['total_records'] = 3
+    elif damage == 'schema':
+        del manifest['report_schema_version']
+    else:
+        del manifest['run_metadata']['zone_mapping']
+    path.write_text(json.dumps(manifest), encoding='utf8')
+    with pytest.raises(ValueError):
+        module.verify_workload(work, 'full', compare='recovery')
+
+
+def test_mapping_pin_cannot_change_only_in_workload(synthetic_v2, tmp_path):
+    module, source, baseline, pack, public, _ = synthetic_v2
+    work = tmp_path / 'private'
+    module.prepare_workload(source, baseline, public, work, pack, repeats=1, control_rows=0)
+    path = work / 'workload.json'
+    info = json.loads(path.read_text(encoding='utf8'))
+    info['zone_mapping']['version'] = 'other'
+    path.write_text(json.dumps(info), encoding='utf8')
+    with pytest.raises(ValueError, match='oracle'):
+        module.verify_workload(work)
+
+
+def test_legacy_workload_remains_read_only_without_reinterpreting_identity(synthetic_v2, tmp_path):
+    module, source, baseline, pack, public, _ = synthetic_v2
+    work = tmp_path / 'private'
+    module.prepare_workload(source, baseline, public, work, pack, repeats=1, control_rows=0)
+    output = synthetic_run(module, work, baseline, 'legacy')
+    # Encode the actual historical shapes: one generated cell and no zone pins.
+    path = output / 'Classified_Addresses.csv'
+    write(path, [row[:-2] for row in read(path)])
+    path = output / 'Country_Summary.csv'
+    write(path, [row[:3] + row[-2:] for row in read(path)])
+    path = output / 'Run_Manifest.json'
+    manifest = json.loads(path.read_text(encoding='utf8'))
+    del manifest['report_schema_version'], manifest['generated_columns']
+    del manifest['run_metadata']['zone_mapping']
+    path.write_text(json.dumps(manifest), encoding='utf8')
+    rehash(work / 'dataset.csv', output)
+    for filename in ('oracle.json', 'workload.json'):
+        path = work / filename
+        saved = json.loads(path.read_text(encoding='utf8'))
+        saved['schema_version'] = 1
+        for key in ('report_schema_version', 'generated_columns', 'zone_mapping',
+                    'catalogue_metadata', 'reference_metadata'):
+            del saved[key]
+        if filename == 'oracle.json':
+            for item in saved['block']:
+                del item['zone_code'], item['novsn_zone_code']
+        else:
+            saved['oracle_sha256'] = module.file_sha256(work / 'oracle.json')
+        path.write_text(json.dumps(saved), encoding='utf8')
+    before = {path: path.read_bytes() for path in output.iterdir()}
+    assert module.verify_workload(work, 'legacy')['verified']
+    assert before == {path: path.read_bytes() for path in before}
+    with pytest.raises(ValueError, match='legacy'):
+        module.run_workload(work, pack, name='new')
+    assert not (work / 'new').exists()
 
 
 def tool():
