@@ -71,11 +71,18 @@ jobs:
           /tmp/country-wheel-smoke/bin/python - <<'PY'
           import world_address_engine
           from world_address_engine.data.country_codes import load_country_codes
+          from world_address_engine.data.zone_mappings import load_zone_mappings, zone_values
           from world_address_engine.matching.normalize import _converter
           profile = load_country_codes()
           assert world_address_engine.__version__ == '0.3.0rc1'
           assert len(profile.entries) == 235 and 'CNS' not in profile.entries
           assert profile.geo_to_code['XK'] == 'XO'
+          zones = load_zone_mappings()
+          assert len(zones.entries) == 235 and 'CNS' not in zones.entries
+          assert zone_values('HK', zones) == ('LOCAL', 'A')
+          assert zone_values('CN', zones) == ('CN - Airmail', 'F')
+          assert zone_values('MO', zones) == ('Macau - Surface', 'M')
+          assert zone_values('TW', zones) == ('Taiwan', 'F')
           assert _converter('t2s') is not None
           PY
           /tmp/country-wheel-smoke/bin/world-address-engine analyze --help

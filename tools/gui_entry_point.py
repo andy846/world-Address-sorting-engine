@@ -7,13 +7,14 @@ from __future__ import annotations
 
 import argparse
 import csv
-from contextlib import closing
+from contextlib import closing, contextmanager
 from fnmatch import fnmatchcase
 from importlib.metadata import version
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sqlite3
 import sys
 import tempfile
@@ -22,6 +23,19 @@ from time import monotonic, sleep
 DISTRIBUTION = 'world-address-sorting-engine'
 EXCLUDED_PACK_PATTERNS = ('geonames-*', '*.sqlite', '*.db', '*.sqlite.*', '*.db.*')
 APPROVAL_REFUSAL = 'a signed HKP approval manifest and key are required for a production run'
+
+
+def _same_evidence(actual, expected):
+    """JSON evidence must agree in shape, values and types (True is not 1)."""
+    if type(actual) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        return actual.keys() == expected.keys() and all(
+            _same_evidence(actual[key], value) for key, value in expected.items())
+    if isinstance(expected, list):
+        return len(actual) == len(expected) and all(
+            _same_evidence(a, e) for a, e in zip(actual, expected))
+    return actual == expected
 
 
 def running_version() -> str:
@@ -87,7 +101,7 @@ def report_errors(report, *, expected_version: str, require_frozen: bool = False
     if report.get('gui_feedback') != expected_feedback:
         errors.append('gui_feedback')
     expected_regional = {
-        'default_disabled': True, 'selected_path_used': True,
+        'default_enabled': True, 'selected_path_used': True,
         'same_address_positive': True, 'number_mismatch_negative': True,
         'gui_complete': True, 'destination_counts': {'HK': 1},
         'unresolved': 1, 'version_displayed': True,
@@ -98,6 +112,23 @@ def report_errors(report, *, expected_version: str, require_frozen: bool = False
             or any(type(regional[key]) is not type(value) or regional[key] != value
                    for key, value in expected_regional.items())):
         errors.append('hk_regional')
+    expected_workflow = {
+        'report_schema_version': 2,
+        'generated_columns': ['Country_Code', 'Zone_Code', 'NOVSN_Zone_Code'],
+        'detail_header': ['Address', 'Control no', 'Country_Code', 'Zone_Code', 'NOVSN_Zone_Code'],
+        'detail_rows': [['Hong Kong', '0001', 'HK', 'LOCAL', 'A'],
+                        ['China', '0002', 'CN', 'CN - Airmail', 'F'],
+                        ['Japan', '0003', 'JP', '2', 'D'], ['', '0004', '', '', '']],
+        'summary_header': ['Country_Code', 'Country_Name_TC', 'Country_Name_EN',
+                           'Zone_Code', 'NOVSN_Zone_Code', 'Count', 'Percentage'],
+        'summary_zones': [['CN', 'CN - Airmail', 'F'], ['HK', 'LOCAL', 'A'],
+                          ['JP', '2', 'D'], ['', '', '']],
+        'auto_output_child': True, 'native_pages': True, 'quick_ready': True,
+        'quick_result': {'code': 'HK', 'zone': 'LOCAL', 'novsn': 'A', 'copy_enabled': True},
+        'quick_clear_invalidates': True,
+    }
+    if not _same_evidence(report.get('workflow_v03'), expected_workflow):
+        errors.append('workflow_v03')
     for name, rows in (('preview', 9604), ('xlsx_preview', 1)):
         preview = report.get(name)
         shape = {'total_records': rows, 'original_columns': 12,
@@ -125,6 +156,125 @@ def _synthetic_geo_pack(path):
         CREATE TABLE pack_metadata(profile TEXT NOT NULL);
         INSERT INTO pack_metadata VALUES('EXTENDED_GLOBAL');
         ''')
+    # The persistent quick worker verifies registry metadata before opening its
+    # own readonly classifier. Keep that production guard active in the smoke.
+    manifest = {
+        'pack_id': 'synthetic-global', 'profile': 'EXTENDED_GLOBAL',
+        'pack_version': 'synthetic-smoke-1', 'schema_version': 1,
+        'created_at': '2026-10-26', 'source_date': '2026-10-26',
+        'source_sha256': '0' * 64, 'db_sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+        'record_count': 0, 'alias_count_by_language': {},
+        'attribution': 'Synthetic fixture only', 'license': 'Synthetic self-test fixture',
+    }
+    path.with_name('manifest.json').write_text(json.dumps(manifest), encoding='utf-8')
+
+
+@contextmanager
+def _self_test_country_window(app, work):
+    """Use native INI settings and synthetic-only discovery, including on failure."""
+    from PySide6.QtCore import QSettings
+    from world_address_engine.gui import country_app, country_paths
+
+    settings_factory, discovery = country_app.QSettings, country_paths.discovery_roots
+    country_app.QSettings = lambda *a, **kw: QSettings(
+        str(work / 'self-test.ini'), QSettings.Format.IniFormat)
+    country_paths.discovery_roots = lambda: (work,)
+    window = None
+    try:
+        window = country_app.CountryAnalysisWindow()
+        yield window
+    finally:
+        try:
+            if window is not None:
+                # closeEvent cancels the batch and shuts down the persistent
+                # lookup. Drain queued completion signals before deleting packs.
+                threads = (window._lookup_thread, window.worker_thread)
+                window.close()
+                while window.busy or any(t is not None and t.isRunning() for t in threads):
+                    app.processEvents()
+                    sleep(.005)
+                for thread in threads:
+                    if thread is not None:
+                        thread.wait()
+                app.processEvents()
+                window.close()
+                app.processEvents()
+        finally:
+            country_app.QSettings = settings_factory
+            country_paths.discovery_roots = discovery
+
+
+def _workflow_self_test(app, window, output, work):
+    """Read published schema2 bytes and exercise the native quick page."""
+    manifest = json.loads((output / 'Run_Manifest.json').read_text(encoding='utf-8'))
+    with (output / 'Classified_Addresses.csv').open(encoding='utf-8-sig', newline='') as stream:
+        details = list(csv.reader(stream))
+    with (output / 'Country_Summary.csv').open(encoding='utf-8-sig', newline='') as stream:
+        summaries = list(csv.reader(stream))
+    pages = window.pages
+    native_pages = (pages.count() == 2 and pages.currentIndex() == 0
+                    and pages.tabText(0) == 'Batch analysis'
+                    and pages.tabText(1) == 'Single address lookup'
+                    and pages.widget(0) is window.workspace_scroll
+                    and pages.widget(1) is window.quick)
+    actual = window._output_dir
+    auto_output = (actual is not None and actual.parent == (work / 'regional-output').resolve()
+                   and actual.is_dir()
+                   and re.fullmatch(r'regional-input_output_\d{8}_\d{6}(?:_\d{2,})?', actual.name) is not None
+                   and (actual / 'Run_Manifest.json').is_file()
+                   and actual != output)
+    pages.setCurrentWidget(window.quick)
+    deadline = monotonic() + 5
+    while not (window._lookup_ready and window.quick.query.isEnabled()) and monotonic() < deadline:
+        app.processEvents()
+        sleep(.005)
+    ready = window._lookup_ready and window.quick.query.isEnabled()
+    settled, results = set(), set()
+
+    def on_settled(generation):
+        settled.add(generation)
+
+    def on_result(generation, payload):
+        results.add(generation)
+
+    window.quick.address.setPlainText('Lantern Building\n12 Orchid Road')
+    worker = window._lookup_thread
+    worker.settled.connect(on_settled)
+    worker.result.connect(on_result)
+    try:
+        window.quick.query.click()
+        # The query handler invalidates the display and advances the generation.
+        # Buffer signals before clicking so even an immediate result is retained.
+        query_generation = window._lookup_generation
+        deadline = monotonic() + 5
+        while ready and not (query_generation in settled and query_generation in results) and monotonic() < deadline:
+            app.processEvents()
+            sleep(.005)
+        app.processEvents()
+        completed = ready and query_generation in settled and query_generation in results
+    finally:
+        worker.settled.disconnect(on_settled)
+        worker.result.disconnect(on_result)
+    text = window.quick.result.text() if completed else ''
+    zones = re.search(r'^Zone: (.*) \| NOVSN: (.*)$', text, re.MULTILINE)
+    quick_result = {'code': window.quick._code if completed else '',
+                    'zone': zones.group(1) if zones else '',
+                    'novsn': zones.group(2) if zones else '',
+                    'copy_enabled': completed and window.quick.copy.isEnabled()}
+    window.quick.clear.click()
+    app.processEvents()
+    cleared = (not window.quick.address.toPlainText() and not window.quick._code
+               and not window.quick.copy.isEnabled() and not window.quick.result.text())
+    return {
+        'report_schema_version': manifest.get('report_schema_version'),
+        'generated_columns': manifest.get('generated_columns'),
+        'detail_header': details[0] if details else [], 'detail_rows': details[1:],
+        'summary_header': summaries[0] if summaries else [],
+        'summary_zones': [[row[0], *row[3:5]] for row in summaries[1:] if row],
+        'auto_output_child': auto_output, 'native_pages': native_pages,
+        'quick_ready': ready, 'quick_result': quick_result,
+        'quick_clear_invalidates': cleared,
+    }
 
 
 def _regional_self_test(app, window, work):
@@ -197,7 +347,7 @@ def _regional_self_test(app, window, work):
         writer = csv.writer(stream)
         writer.writerow(['Address'])
         writer.writerows(((positive,), (negative,)))
-    default_disabled = not window.hk_enabled.isChecked()
+    default_enabled = window.hk_enabled.isChecked()
     window.input_path.setText(str(source))
     window.address_columns.addItem('Address')
     window.address_columns.item(0).setSelected(True)
@@ -219,7 +369,7 @@ def _regional_self_test(app, window, work):
     result = window._last_report or {}
     regional = result.get('run_metadata', {}).get('hk_regional') or {}
     return {
-        'default_disabled': default_disabled,
+        'default_enabled': default_enabled,
         'selected_path_used': (regional.get('path') == str(path.resolve())
                                and regional.get('profile') == 'HK_BILINGUAL_REGIONAL'),
         'same_address_positive': same_address, 'number_mismatch_negative': mismatch,
@@ -305,12 +455,11 @@ def self_test() -> dict:
                 report['classification_error'] = str(exc)
             report['classification_output_created'] = output.exists()
             from world_address_engine.data.country_codes import load_country_codes
-            from world_address_engine.gui.country_app import CountryAnalysisWindow, _read_country_export
+            from world_address_engine.gui.country_app import _read_country_export
             from world_address_engine.jobs.country_analysis import analyze_job
             from world_address_engine.matching.normalize import _converter
 
-            country_window = CountryAnalysisWindow()
-            try:
+            with _self_test_country_window(app, work) as country_window:
                 line_columns = ['Line 1', 'Line 2', 'Line 3']
                 country_window.address_columns.addItems(line_columns)
                 for index in (1, 2, 0):
@@ -369,9 +518,7 @@ def self_test() -> dict:
                                                 for kind in ('t2s', 's2t')),
                 }
                 report['hk_regional'] = _regional_self_test(app, country_window, work)
-            finally:
-                country_window.close()
-                app.processEvents()
+                report['workflow_v03'] = _workflow_self_test(app, country_window, country_output, work)
     finally:
         window.close()
         app.processEvents()

@@ -1,7 +1,9 @@
 """Packaging checks exercise reports and archives without building a real bundle."""
 
 import builtins
+import csv
 from contextlib import closing
+from copy import deepcopy
 import hashlib
 import json
 import os
@@ -9,7 +11,9 @@ from pathlib import Path
 import subprocess
 import sqlite3
 import sys
+import threading
 import tomllib
+from types import SimpleNamespace
 
 import pytest
 
@@ -19,6 +23,305 @@ if str(REPO_ROOT / 'tools') not in sys.path:
 
 import gui_entry_point as entry  # noqa: E402
 import package_windows as packaging  # noqa: E402
+
+
+WORKFLOW_V03 = {
+    'report_schema_version': 2,
+    'generated_columns': ['Country_Code', 'Zone_Code', 'NOVSN_Zone_Code'],
+    'detail_header': ['Address', 'Control no', 'Country_Code', 'Zone_Code', 'NOVSN_Zone_Code'],
+    'detail_rows': [['Hong Kong', '0001', 'HK', 'LOCAL', 'A'],
+                    ['China', '0002', 'CN', 'CN - Airmail', 'F'],
+                    ['Japan', '0003', 'JP', '2', 'D'], ['', '0004', '', '', '']],
+    'summary_header': ['Country_Code', 'Country_Name_TC', 'Country_Name_EN',
+                       'Zone_Code', 'NOVSN_Zone_Code', 'Count', 'Percentage'],
+    'summary_zones': [['CN', 'CN - Airmail', 'F'], ['HK', 'LOCAL', 'A'],
+                      ['JP', '2', 'D'], ['', '', '']],
+    'auto_output_child': True,
+    'native_pages': True,
+    'quick_ready': True,
+    'quick_result': {'code': 'HK', 'zone': 'LOCAL', 'novsn': 'A', 'copy_enabled': True},
+    'quick_clear_invalidates': True,
+}
+
+
+def test_self_test_isolates_settings_discovery_and_drains_before_cleanup(monkeypatch):
+    pytest.importorskip('PySide6')
+    from PySide6 import QtCore
+    from world_address_engine.gui import country_app, country_paths
+    from world_address_engine.gui.app import _LIVE_THREADS
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError('self-test must isolate native preferences and installed packs')
+
+    original_settings = QtCore.QSettings
+    original_temp = entry.tempfile.TemporaryDirectory
+    settings_paths, roots_seen, threads = [], [], []
+    original_build = country_app.CountryAnalysisWindow._build
+
+    def settings(path, format):
+        assert Path(path).name == 'self-test.ini'
+        assert format == original_settings.Format.IniFormat
+        settings_paths.append(Path(path))
+        return original_settings(path, format)
+
+    settings.Format = original_settings.Format
+
+    def build(window):
+        roots_seen.append(country_paths.discovery_roots())
+        original_build(window)
+        threads.append(window._lookup_thread)
+
+    class CheckedCleanup(original_temp):
+        def cleanup(self):
+            if Path(self.name).name.startswith('wase-self-test-'):
+                assert all(not thread.isRunning() for thread in threads)
+                assert not (set(threads) & _LIVE_THREADS)
+                assert country_app.QSettings is forbidden
+                assert country_paths.discovery_roots is forbidden
+            super().cleanup()
+
+    monkeypatch.setattr(country_app, 'QSettings', forbidden)
+    monkeypatch.setattr(country_paths, 'discovery_roots', forbidden)
+    monkeypatch.setattr(QtCore, 'QSettings', settings)
+    monkeypatch.setattr(country_app.CountryAnalysisWindow, '_build', build)
+    monkeypatch.setattr(entry.tempfile, 'TemporaryDirectory', CheckedCleanup)
+    report = entry.self_test()
+    assert report['ok'] is True
+    assert settings_paths and all(path == settings_paths[0] for path in settings_paths)
+    assert roots_seen == [(settings_paths[0].parent,)]
+    assert not settings_paths[0].parent.exists()
+
+
+@pytest.mark.parametrize('field', [*WORKFLOW_V03, None])
+@pytest.mark.parametrize('fault', ['missing', 'false', 'integer', 'string', 'null'])
+def test_bundle_requires_strict_workflow_v03_evidence(field, fault):
+    # A separately specified contract lets the gate fail RED without constructing
+    # an unisolated pre-v0.3 GUI or warming any installed reference packs.
+    report = {'workflow_v03': deepcopy(WORKFLOW_V03)}
+    assert 'workflow_v03' not in entry.report_errors(report, expected_version='test')
+    if field is None:
+        report.pop('workflow_v03')
+    elif fault == 'missing':
+        report['workflow_v03'].pop(field)
+    else:
+        report['workflow_v03'][field] = {'false': False, 'integer': 1,
+                                          'string': 'true', 'null': None}[fault]
+    assert 'workflow_v03' in entry.report_errors(report, expected_version='test')
+
+
+def test_bundle_rejects_extra_workflow_claims_and_nested_type_coercion():
+    for field, value in [('extra', True), ('quick_result',
+                         {'code': 'HK', 'zone': 'LOCAL', 'novsn': 'A', 'copy_enabled': 1})]:
+        report = {'workflow_v03': deepcopy(WORKFLOW_V03)}
+        report['workflow_v03'][field] = value
+        assert 'workflow_v03' in entry.report_errors(report, expected_version='test')
+
+
+def test_bundle_proves_v03_exports_and_native_quick_workflow(runtime_report):
+    assert runtime_report['workflow_v03'] == WORKFLOW_V03
+
+
+@pytest.mark.parametrize('pause_at', ['warm_ready', 'query_ready', 'query_result'])
+def test_v03_smoke_waits_for_real_worker_query_generation(monkeypatch, pause_at):
+    """Ready before settled, or another generation's signals, cannot end the wait."""
+    pytest.importorskip('PySide6')
+    from PySide6.QtCore import Qt
+
+    original = entry._workflow_self_test
+    observations = []
+
+    def paused_workflow(app, window, output, work):
+        worker = window._lookup_thread
+        paused, release = threading.Event(), threading.Event()
+        window._pack_timer.stop()
+        window._lookup_generation += 1
+        warm_generation = window._lookup_generation
+        query_generation = None
+        window._lookup_ready = False
+        window.quick.query.setEnabled(False)
+
+        submit = worker.submit
+
+        def track_submit(generation, config, text=None):
+            nonlocal query_generation
+            if text is not None:
+                query_generation = generation
+            submit(generation, config, text)
+
+        monkeypatch.setattr(worker, 'submit', track_submit)
+
+        def pause(generation, *args):
+            target = warm_generation if pause_at == 'warm_ready' else query_generation
+            if generation == target and (pause_at == 'query_result' or args[0]):
+                paused.set()
+                release.wait(10)
+
+        signal = worker.result if pause_at == 'query_result' else worker.state
+        signal.connect(pause, Qt.ConnectionType.DirectConnection)
+        pumps = 0
+
+        def process_events():
+            nonlocal pumps
+            app.processEvents()
+            if paused.is_set() and window._lookup_ready:
+                pumps += 1
+                if pumps == 1 and pause_at != 'warm_ready':
+                    # Both old and warm completions are unrelated to this query.
+                    worker.result.emit(warm_generation, {
+                        'code': 'JP', 'name': 'Japan', 'status': 'DETERMINED',
+                        'zone': '2', 'novsn': 'D'})
+                    worker.settled.emit(warm_generation - 1)
+                    worker.settled.emit(warm_generation)
+                    if pause_at == 'query_ready':
+                        # Even matching completion cannot replace a matching result.
+                        worker.settled.emit(query_generation)
+                elif pumps >= 5:
+                    release.set()
+
+        try:
+            window._warm_lookup()
+            if pause_at != 'warm_ready':
+                deadline = entry.monotonic() + 5
+                while not (window._lookup_ready and window.quick.query.isEnabled()):
+                    assert entry.monotonic() < deadline, 'real worker did not warm'
+                    app.processEvents()
+                    entry.sleep(.005)
+            evidence = original(SimpleNamespace(processEvents=process_events), window, output, work)
+            observations.append((paused.is_set(), release.is_set()))
+            return evidence
+        finally:
+            release.set()
+            signal.disconnect(pause)
+
+    monkeypatch.setattr(entry, '_workflow_self_test', paused_workflow)
+    report = entry.self_test()
+    assert report['workflow_v03'] == WORKFLOW_V03
+    assert report['ok'] is True
+    assert observations == [(True, True)], 'workflow returned before the real worker was released'
+
+
+@pytest.mark.parametrize('failure', ['schema', 'generated_columns', 'detail_header',
+                                    'original_cell', 'hk_zone', 'cn_zone', 'jp_novsn',
+                                    'unresolved_country', 'unresolved_zone', 'unresolved_novsn',
+                                    'summary_header', 'summary_zone'])
+def test_v03_smoke_reads_actual_published_export_bytes(monkeypatch, failure):
+    pytest.importorskip('PySide6')
+    from world_address_engine.jobs import country_analysis
+    original = country_analysis.analyze_job
+
+    def corrupt(source, output, *args, **kwargs):
+        report = original(source, output, *args, **kwargs)
+        if Path(source).name != 'country-synthetic.csv':
+            return report
+        output = Path(output)
+        if failure in ('schema', 'generated_columns'):
+            path = output / 'Run_Manifest.json'
+            manifest = json.loads(path.read_text('utf-8'))
+            if failure == 'schema':
+                manifest['report_schema_version'] = 1
+            else:
+                manifest['generated_columns'] = ['Country_Code', 'NOVSN_Zone_Code', 'Zone_Code']
+            # Leave the API return intact: the smoke must read the published file.
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+        else:
+            summary = failure.startswith('summary_')
+            path = output / ('Country_Summary.csv' if summary else 'Classified_Addresses.csv')
+            with path.open(encoding='utf-8-sig', newline='') as stream:
+                rows = list(csv.reader(stream))
+            row, col = {'detail_header': (0, 3), 'original_cell': (1, 1),
+                        'hk_zone': (1, 3), 'cn_zone': (2, 3), 'jp_novsn': (3, 4),
+                        'unresolved_country': (4, 2), 'unresolved_zone': (4, 3),
+                        'unresolved_novsn': (4, 4), 'summary_header': (0, 3),
+                        'summary_zone': (1, 3)}[failure]
+            rows[row][col] = 'BROKEN'
+            with path.open('w', encoding='utf-8-sig', newline='') as stream:
+                csv.writer(stream).writerows(rows)
+        return report
+
+    monkeypatch.setattr(country_analysis, 'analyze_job', corrupt)
+    report = entry.self_test()
+    assert report['ok'] is False
+    assert 'workflow_v03' in report['assertion_failures']
+
+
+@pytest.mark.parametrize('failure', ['auto_output', 'page_name', 'batch_default',
+                                    'quick_code', 'quick_zone', 'quick_novsn',
+                                    'quick_copy', 'clear_invalidation', 'default_hk'])
+def test_v03_smoke_rejects_broken_native_workflow(monkeypatch, failure):
+    pytest.importorskip('PySide6')
+    from world_address_engine.gui import country_app, country_lookup
+    if failure == 'auto_output':
+        def exact_parent(source, parent):
+            parent = Path(parent)
+            parent.mkdir(parents=True, exist_ok=True)
+            return parent.resolve()
+        monkeypatch.setattr(country_app, 'allocate_run_directory', exact_parent)
+    elif failure in ('page_name', 'batch_default', 'default_hk'):
+        original = country_app.CountryAnalysisWindow._build
+        def build(window):
+            original(window)
+            if failure == 'page_name':
+                window.pages.setTabText(1, 'Single address')
+            elif failure == 'batch_default':
+                window.pages.setCurrentIndex(1)
+            else:
+                window.hk_enabled.setChecked(False)
+        monkeypatch.setattr(country_app.CountryAnalysisWindow, '_build', build)
+    elif failure == 'clear_invalidation':
+        original = country_lookup.QuickLookupPanel.invalidate
+        def invalidate(panel):
+            if panel.address.toPlainText():
+                original(panel)
+        monkeypatch.setattr(country_lookup.QuickLookupPanel, 'invalidate', invalidate)
+    else:
+        original = country_lookup.QuickLookupPanel.show_result
+        def show(panel, payload):
+            payload = dict(payload)
+            if failure != 'quick_copy':
+                payload[failure.removeprefix('quick_')] = 'BROKEN'
+            original(panel, payload)
+            if failure == 'quick_copy':
+                panel.copy.setEnabled(False)
+        monkeypatch.setattr(country_lookup.QuickLookupPanel, 'show_result', show)
+    report = entry.self_test()
+    assert report['ok'] is False
+    assert ('hk_regional' if failure == 'default_hk' else 'workflow_v03') in report['assertion_failures']
+
+
+def test_self_test_restores_isolation_after_batch_exception(monkeypatch):
+    pytest.importorskip('PySide6')
+    from world_address_engine.gui import country_app, country_paths
+    from world_address_engine.gui.app import _LIVE_THREADS
+    settings, roots = country_app.QSettings, country_paths.discovery_roots
+    original = country_app.CountryAnalysisWindow.start_job
+    original_temp = entry.tempfile.TemporaryDirectory
+    windows, checked = [], []
+
+    def fail_after_start(window):
+        original(window)
+        windows.append(window)
+        assert window.busy
+        raise RuntimeError('injected failure after batch launch')
+
+    class CheckedCleanup(original_temp):
+        def cleanup(self):
+            if Path(self.name).name.startswith('wase-self-test-'):
+                assert country_app.QSettings is settings
+                assert country_paths.discovery_roots is roots
+                assert windows
+                window = windows[0]
+                assert not window.busy
+                for thread in (window.worker_thread, window._lookup_thread):
+                    assert not thread.isRunning()
+                    assert thread not in _LIVE_THREADS
+                checked.append(self.name)
+            super().cleanup()
+
+    monkeypatch.setattr(country_app.CountryAnalysisWindow, 'start_job', fail_after_start)
+    monkeypatch.setattr(entry.tempfile, 'TemporaryDirectory', CheckedCleanup)
+    with pytest.raises(RuntimeError, match='injected failure after batch launch'):
+        entry.self_test()
+    assert checked and not Path(checked[0]).exists()
 
 
 def test_packaging_extra_supplies_the_builder():
@@ -216,7 +519,7 @@ def test_bundle_rejects_missing_country_analysis_evidence(runtime_report):
 
 def test_bundle_proves_optional_regional_api_and_selected_gui_path(runtime_report):
     assert runtime_report['hk_regional'] == {
-        'default_disabled': True, 'selected_path_used': True,
+        'default_enabled': True, 'selected_path_used': True,
         'same_address_positive': True, 'number_mismatch_negative': True,
         'gui_complete': True, 'destination_counts': {'HK': 1},
         'unresolved': 1, 'version_displayed': True,
@@ -227,13 +530,11 @@ def test_bundle_proves_optional_regional_api_and_selected_gui_path(runtime_repor
 def test_regional_smoke_uses_a_verified_partial_runtime_fixture(tmp_path):
     pytest.importorskip('PySide6')
     from PySide6.QtWidgets import QApplication
-    from world_address_engine.gui.country_app import CountryAnalysisWindow
     from world_address_engine.data.hk_regional import verify_hk_pack
 
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     app = QApplication.instance() or QApplication([])
-    window = CountryAnalysisWindow()
-    try:
+    with entry._self_test_country_window(app, tmp_path) as window:
         evidence = entry._regional_self_test(app, window, tmp_path)
         root = tmp_path / 'regional'
         contents = (root / 'quarantine.jsonl').read_bytes()
@@ -253,9 +554,6 @@ def test_regional_smoke_uses_a_verified_partial_runtime_fixture(tmp_path):
         assert 'Hong Kong: synthetic-smoke-1 (partial source; 1 excluded)' in window.source_versions.text()
         assert evidence['partial_source_displayed'] is True
         assert evidence['quarantine_identity_pinned'] is True
-    finally:
-        window.close()
-        app.processEvents()
 
 
 def test_self_test_global_fixtures_satisfy_real_pack_validation(monkeypatch):
@@ -276,7 +574,7 @@ def test_self_test_global_fixtures_satisfy_real_pack_validation(monkeypatch):
     assert {'synthetic-geo.db', 'regional-global.db'} <= validated
 
 
-@pytest.mark.parametrize('field', ['default_disabled', 'selected_path_used',
+@pytest.mark.parametrize('field', ['default_enabled', 'selected_path_used',
                                  'same_address_positive', 'number_mismatch_negative',
                                  'gui_complete', 'destination_counts', 'unresolved',
                                  'version_displayed', 'partial_source_displayed',

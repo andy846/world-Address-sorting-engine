@@ -64,10 +64,10 @@ CURRENT_RELEASE.json; no main merge or formal promotion before new manual accept
   tools/import_country_zones.py and new tests/unit/test_zone_mappings.py only.
 - [x] B: main implementer owns country_reports.py, country_analysis.py,
   country_cases.py and corresponding non-GUI report/job/cases tests.
-- [ ] C: GUI worker owns country_app.py, country_layout.py,country_results.py,
+- [x] C: GUI worker owns country_app.py, country_layout.py,country_results.py,
   new GUI helper modules, GUI integration tests; default/missing pack, automatic
   sibling output and concurrent single lookup. No edits to data/jobs/io/tools.
-- [ ] D: benchmark worker owns benchmark_country_repeat.py,
+- [x] D: benchmark worker owns benchmark_country_repeat.py,
   country_benchmark_verify.py and their two unit-test modules only; authenticate
   schema2/zone metadata/new fields, preserve legacy verification where explicit.
 - [ ] Main integrates candidate version/CI/packaging assertions, per-task reviews,
@@ -111,3 +111,26 @@ probes; no important findings. Verified schema/downgrade rejection, mapping
 changes before export/finalization, report read races, unchanged diagnostics,
 legacy blank zones and state2 rejection without mutation. Main rerun including
 candidate metadata: 55 passed in 16.13s (overlapping focused group).
+
+Review round 2: Task D independent synthetic review found no important issues
+(126 passed, two live-revision runner checks pending freeze; 48 rehashed zone
+corruptions rejected). GUI review reproduced an allocation-boundary reference
+replacement and retained quick-query cache keys; a smaller preflight-schema
+gap was also identified. Packaging review reproduced a ready/settled race in
+the smoke producer. First full suite was stopped at 54% without failures to
+apply these corrections; that interrupted run is not a completed acceptance.
+New backend identity regression: five RED failures, then 42 focused passed.
+
+Review corrections completed: backend 4fae30e (51 main focused tests; separate
+43-test independent recheck). GUI preflight pins consumed Geo/HK/manifest and
+quarantine bytes through job creation, validates schema/profile before output,
+and clears query cache even on exceptions: 14 RED, then 29 focused GREEN;
+main caller/GUI recheck 139 passed in 35.69s. Independent final 29-test rerun
+used the project Python3.13 interpreter unclamped; the earlier reviewer CSV
+overflow was specific to an unsupported Python3.11 interpreter.
+Packaging ready/settled race: three deterministic RED tests, then 197 passed,
+one optional actual-build skip; independent three-test race rerun passed.
+Actual 0.3.0rc1 EXE build and frozen offline workflow self-test passed:
+48,801,605 bytes, all prior and new strict gates true, no DB bundled.
+Fresh private schema2 replay preserved all 9,604 originals/codes/diagnostics
+and verified every zone pair; public 336/336 smoke bank passed unchanged.
