@@ -13,12 +13,14 @@ from PySide6.QtGui import QColor, QFont, QFontDatabase, QFontInfo, QPalette  # n
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QLabel, QWidget  # noqa: E402
 
-from tests.integration.test_country_gui import app  # noqa: E402,F401
+from tests.integration.test_country_gui import app, wait  # noqa: E402,F401
 from world_address_engine.gui import country_app  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
 def isolated_settings(monkeypatch, tmp_path):
+    from world_address_engine.gui import country_paths
+    monkeypatch.setattr(country_paths, 'discovery_roots', lambda: (tmp_path,))
     path = str(tmp_path / 'appearance.ini')
     # Patch the constructor lookup, including windows opened without injection.
     monkeypatch.setattr(country_app, 'QSettings',
@@ -31,6 +33,7 @@ def window(app):
     instance = country_app.CountryAnalysisWindow()
     yield instance
     instance.close()
+    wait(app, lambda: not instance._lookup_thread.isRunning())
     app.processEvents()
 
 

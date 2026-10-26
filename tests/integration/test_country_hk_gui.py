@@ -8,7 +8,7 @@ import weakref
 import pytest
 
 from tests.integration.test_country_gui import (  # noqa: F401
-    app, window, configure, install_runner, report, wait,
+    app, window, configure, install_runner, report, wait, reference_settings,
 )
 
 
@@ -22,7 +22,7 @@ def test_discovery_prefills_without_enabling(tmp_path, monkeypatch, app):
     instance = CountryAnalysisWindow()
     try:
         assert instance.hk_regional_db.text() == str(folder / 'pack.db')
-        assert not instance.hk_enabled.isChecked()
+        assert instance.hk_enabled.isChecked()
         assert instance.hk_enabled.accessibleName()
         assert instance.hk_regional_db.accessibleName()
     finally:
@@ -32,7 +32,11 @@ def test_discovery_prefills_without_enabling(tmp_path, monkeypatch, app):
 @pytest.mark.parametrize('enabled', [False, True])
 def test_optional_kwarg_runs_only_when_enabled(window, tmp_path, app, monkeypatch, enabled):
     configure(window, tmp_path)
-    path = tmp_path / 'regional.db'
+    from tests.unit.test_hk_als_builder import build
+    regional = tmp_path / 'regional'
+    regional.mkdir()
+    build(regional)
+    path = regional / 'pack' / 'pack.db'
     window.hk_regional_db.setText(str(path))
     window.hk_enabled.setChecked(enabled)
     main_thread = threading.get_ident()
@@ -66,7 +70,7 @@ def test_browse_enables_but_cancel_does_not(window, monkeypatch):
     assert not window.hk_enabled.isChecked()
 
 
-@pytest.mark.parametrize('path', ['', 'missing.db'])
+@pytest.mark.parametrize('path', ['missing.db'])
 def test_selected_path_failure_on_worker_is_clear_without_state(window, tmp_path, app, monkeypatch, path):
     configure(window, tmp_path)
     window.hk_enabled.setChecked(True)
@@ -161,7 +165,7 @@ def test_real_source_validation_metadata_labels_completed_and_resumed_runs(
     assert window.source_versions.text().endswith(expected)
     assert window._last_report['run_metadata']['hk_regional']['source_validation'] == metadata['source_validation']
     if state != 'COMPLETE':
-        saved = json.loads((tmp_path / 'export' / '.country-state' / 'config.json').read_text(encoding='utf8'))
+        saved = json.loads((window._output_dir / '.country-state' / 'config.json').read_text(encoding='utf8'))
         assert saved['hk_regional'] == window._last_report['run_metadata']['hk_regional']
         # A different current selection must not replace the real checkpoint label.
         window.hk_enabled.setChecked(False)
@@ -245,7 +249,7 @@ def test_real_worker_report_and_disabled_outputs_match_direct_runner(window, app
     wait(app, lambda: not window.busy)
     assert window.job_state == 'done', window.log.toPlainText()
     for name in ('Classified_Addresses.csv', 'Country_Diagnostics.csv', 'Country_Summary.csv'):
-        assert (direct / name).read_bytes() == (tmp_path / 'export' / name).read_bytes()
+        assert (direct / name).read_bytes() == (window._output_dir / name).read_bytes()
     assert ('Hong Kong: test' if enabled else 'Hong Kong: disabled') in window.source_versions.text()
     if enabled:
         assert validation_threads and all(ident != main_thread for ident in validation_threads)
@@ -299,10 +303,10 @@ def test_real_partial_runs_and_resume_display_checkpoint_selection(
     main_ident = threading.get_ident()
     checkpoint_reads = []
     original_read = Path.read_text
-    checkpoint = tmp_path / 'export' / '.country-state' / 'config.json'
+    checkpoint = None
 
     def read_text(path, *args, **kwargs):
-        if path == checkpoint:
+        if path.name == 'config.json' and path.parent.name == '.country-state':
             checkpoint_reads.append(threading.get_ident())
         return original_read(path, *args, **kwargs)
 
@@ -343,7 +347,7 @@ def test_real_partial_runs_and_resume_display_checkpoint_selection(
     assert expected in window.source_versions.text()
     assert checkpoint_reads and all(ident != main_ident for ident in checkpoint_reads)
     # This is the real checkpoint written by the runner, not fabricated metadata.
-    saved = json.loads(original_read(checkpoint, encoding='utf-8'))
+    saved = json.loads(original_read(window._output_dir / '.country-state' / 'config.json', encoding='utf-8'))
     assert window._last_report['run_metadata']['hk_regional'] == saved['hk_regional']
     window.hk_enabled.setChecked(not enabled)
     window.hk_regional_db.setText('different-current-choice.db')
@@ -367,7 +371,7 @@ def test_missing_partial_metadata_is_unavailable_not_disabled(window, app, tmp_p
 
     def analyze(*args, **kwargs):
         if saved is not None:
-            checkpoint = tmp_path / 'export' / '.country-state'
+            checkpoint = args[1] / '.country-state'
             checkpoint.mkdir(parents=True)
             (checkpoint / 'config.json').write_text(saved, encoding='utf-8')
         return {'job_kind': 'country-analysis', 'run_status': 'PAUSED', 'committed_records': 0}

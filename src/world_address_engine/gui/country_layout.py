@@ -3,7 +3,7 @@ from PySide6.QtCore import QEvent, QSize, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
     QLayout, QLineEdit, QListWidget, QPushButton, QProgressBar, QScrollArea, QSizePolicy, QSplitter,
-    QTextEdit, QVBoxLayout, QWidget,
+    QTextEdit, QVBoxLayout, QWidget, QTabWidget,
 )
 
 from world_address_engine.gui.country_results import CountryResultsPanel
@@ -230,12 +230,12 @@ def build_workbench(w, discover_pack, discover_hk_pack):
 
     w.input_path = QLineEdit()
     w.input_path.setPlaceholderText('CSV, TXT or XLSX')
-    w.output_dir = QLineEdit()
-    w.output_dir.setPlaceholderText('New empty folder (or automatic)')
+    w.output_dir = QLineEdit(str(w._appearance_settings.value('output/parent', '')))
+    w.output_dir.setPlaceholderText('Parent directory (blank = beside input)')
     for edit in (w.input_path, w.output_dir):
         edit.textChanged.connect(edit.setToolTip)
     field('Address file', w.input_path, w._choose_input, 'Choose address file')
-    field('Output folder', w.output_dir, w._choose_output, 'Choose output folder')
+    field('Output parent', w.output_dir, w._choose_output, 'Choose output folder')
     w.encoding = QComboBox()
     w.encoding.setEditable(True)
     w.encoding.addItems(['utf-8-sig', 'utf-8', 'big5', 'gb18030', 'cp1252'])
@@ -261,17 +261,18 @@ def build_workbench(w, discover_pack, discover_hk_pack):
     w.preview_summary = _label('Load columns to inspect this file without showing addresses.', role='muted')
     settings.addWidget(w.preview_summary)
     settings.addWidget(_label('02 / OFFLINE REFERENCE', role='section'))
-    w.geo_db = QLineEdit(discover_pack())
+    w.geo_db = QLineEdit(str(w._appearance_settings.value('packs/geo', discover_pack())))
     w.geo_db.setPlaceholderText('Installed GeoNames SQLite pack')
     w.geo_db.setToolTip(w.geo_db.text())
     w.geo_db.textChanged.connect(w.geo_db.setToolTip)
     field('GeoNames pack', w.geo_db, w._choose_geo_db, 'Choose offline GeoNames pack')
-    w.hk_enabled = QCheckBox('Enable Hong Kong address pack')
+    w.hk_enabled = QCheckBox('Use Hong Kong pack')
     w.hk_enabled.setAccessibleName('Enable optional Hong Kong address pack')
-    w.hk_enabled.setToolTip('Optional offline bilingual lookup for unresolved addresses. Disabled by default.')
+    w.hk_enabled.setChecked(w._appearance_settings.value('packs/hk_enabled', True, type=bool))
+    w.hk_enabled.setToolTip('Offline bilingual lookup. Enabled by default when installed; you can turn it off.')
     w.hk_enabled.installEventFilter(w.settings_scroll)
     settings.addWidget(w.hk_enabled)
-    w.hk_regional_db = QLineEdit(discover_hk_pack())
+    w.hk_regional_db = QLineEdit(str(w._appearance_settings.value('packs/hk', discover_hk_pack())))
     w.hk_regional_db.setPlaceholderText('Optional installed ALS SQLite pack')
     w.hk_regional_db.setToolTip(w.hk_regional_db.text())
     w.hk_regional_db.textChanged.connect(w.hk_regional_db.setToolTip)
@@ -280,6 +281,14 @@ def build_workbench(w, discover_pack, discover_hk_pack):
     settings.addWidget(_label('Enable to use this pack for unresolved addresses. '
                               'Resume uses the original saved pack. No online queries.', role='muted'))
     settings.addWidget(_label('Country catalogue is included automatically.', role='muted'))
+    w.pack_status = _label('Verifying installed reference packs…', role='muted')
+    settings.addWidget(w.pack_status)
+    w.reload_packs = QPushButton('Reload references')
+    w.reload_packs.clicked.connect(w._pack_changed)
+    settings.addWidget(w.reload_packs)
+    w.installed_packs = QPushButton('Use installed packs')
+    w.installed_packs.clicked.connect(w._use_installed_packs)
+    settings.addWidget(w.installed_packs)
     settings.addStretch(1)
     w.settings_scroll.setWidget(w.inputs)
     w.workbench.addWidget(w.settings_scroll)
@@ -337,7 +346,14 @@ def build_workbench(w, discover_pack, discover_hk_pack):
     w.results.exportRequested.connect(w._choose_case_export)
     workspace.addWidget(w.results, 1)
     w.workspace_scroll.setWidget(w.workspace)
-    w.workbench.addWidget(w.workspace_scroll)
+    from world_address_engine.gui.country_lookup import QuickLookupPanel
+    w.pages = QTabWidget()
+    w.pages.setAccessibleName('Workflow pages')
+    w.pages.setDocumentMode(True)
+    w.pages.addTab(w.workspace_scroll, 'Batch analysis')
+    w.quick = QuickLookupPanel()
+    w.pages.addTab(w.quick, 'Single address lookup')
+    w.workbench.addWidget(w.pages)
     w.workbench.setStretchFactor(0, 0)
     w.workbench.setStretchFactor(1, 1)
     w.workbench.setSizes([320, 900])

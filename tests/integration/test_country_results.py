@@ -293,3 +293,17 @@ def test_large_totals_reflow_without_clipping_leading_digits(panel, app, point_s
     app.processEvents()
     assert panel._metric_columns == 1
     assert panel.total_value.width() >= panel.total_value.fontMetrics().horizontalAdvance(panel.total_value.text())
+
+@pytest.mark.parametrize('legacy', [False, True])
+def test_case_zone_columns_preserve_legacy_blanks(panel, legacy):
+    case = row()
+    case.update(code='HK', status='DETERMINED')
+    if not legacy:
+        case.update(zone_code='LOCAL', novsn_zone_code='A')
+    panel.apply_page({'rows': [case], 'has_next': False, 'next_cursor': 2})
+    headers = [panel.case_table.horizontalHeaderItem(i).text() for i in range(panel.case_table.columnCount())]
+    assert headers[4:6] == ['Zone', 'NOVSN']
+    assert panel.case_table.item(0, 4).text() == ('' if legacy else 'LOCAL')
+    assert panel.case_table.item(0, 5).text() == ('' if legacy else 'A')
+    panel.case_table.selectRow(0)
+    assert 'Zone:' in panel.case_detail.toPlainText()

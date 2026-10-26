@@ -35,15 +35,32 @@ def wait(app, predicate, timeout=8):
     assert predicate(), 'GUI did not reach the expected state'
 
 
+@pytest.fixture(autouse=True)
+def reference_settings(app, monkeypatch, tmp_path):
+    from PySide6.QtCore import QSettings
+    from world_address_engine.gui import country_app, country_paths
+    settings = QSettings(str(tmp_path / 'references.ini'), QSettings.Format.IniFormat)
+    monkeypatch.setattr(country_app, 'QSettings', lambda *args: settings)
+    monkeypatch.setattr(country_paths, 'discovery_roots', lambda: (tmp_path,))
+    yield settings
+
+
 @pytest.fixture
 def window(app, monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     module = importlib.import_module('world_address_engine.gui.country_app')
+    monkeypatch.setattr(module, '_discover_geo_pack', lambda: '')
+    monkeypatch.setattr(module, '_discover_hk_pack', lambda: '')
+    from PySide6.QtCore import QSettings
+    settings = QSettings(str(tmp_path / 'settings.ini'), QSettings.Format.IniFormat)
+    monkeypatch.setattr(module, 'QSettings', lambda *args: settings)
+    monkeypatch.setattr(module.QFileDialog, 'getExistingDirectory', lambda *args: instance.output_dir.text())
     instance = module.CountryAnalysisWindow()
     yield instance
     instance.cancel_job()
     wait(app, lambda: not instance.busy)
     instance.close()
+    wait(app, lambda: not instance._lookup_thread.isRunning())
     app.processEvents()
 
 
@@ -56,8 +73,11 @@ def source(tmp_path):
 def configure(window, tmp_path):
     window.input_path.setText(str(source(tmp_path)))
     pack = tmp_path / 'synthetic.db'
-    pack.touch()
+    import shutil
+    from tests.unit.test_retrieve import geo
+    shutil.copyfile(geo(tmp_path), pack)
     window.geo_db.setText(str(pack))
+    window.hk_enabled.setChecked(False)
     window.output_dir.setText(str(tmp_path / 'export'))
     window.address_columns.addItem('NAME_ADDRESS_LINE1')
     window.address_columns.item(0).setSelected(True)
@@ -134,17 +154,21 @@ def test_analyze_passes_normal_inputs_reads_exports_and_updates_country_counts(
 
     def analyze(input_path, output_dir, geo_db, input_options=None, *,
                 catalogue_path=None, batch_size=1000, max_batches=None,
-                on_progress=None, on_event=None, cancel_requested=None, keep_checkpoint=False):
+                on_progress=None, on_event=None, cancel_requested=None, keep_checkpoint=False,
+                expected_reference_identity=None):
         assert threading.get_ident() != gui_ident
         assert input_path == tmp_path / 'synthetic.csv'
         assert geo_db == tmp_path / 'synthetic.db'
         assert input_options == {'encoding': 'big5', 'sheet_name': 'Addresses',
                                  'address_columns': ['NAME_ADDRESS_LINE1']}
         assert catalogue_path is None
+        from world_address_engine.jobs.checkpoint import file_sha256
+        assert expected_reference_identity == {
+            'geo_sha256': file_sha256(geo_db), 'geo_manifest_sha256': None, 'hk_regional': None}
         assert callable(cancel_requested)
         assert callable(on_event)
         on_progress(6)
-        output_dir.mkdir()
+        output_dir.mkdir(exist_ok=True)
         (output_dir / 'Run_Manifest.json').write_text(json.dumps(report()), encoding='utf-8')
         (output_dir / 'Country_Summary.csv').write_text(
             'Country_Code,Country_Name,Count\nJP,Japan,5\n', encoding='utf-8-sig')
@@ -279,7 +303,7 @@ def test_reader_accepts_published_bilingual_summary_and_unresolved_row(window, t
     configure(window, tmp_path)
 
     def analyze(input_path, output_dir, geo_db, input_options, **kwargs):
-        output_dir.mkdir()
+        output_dir.mkdir(exist_ok=True)
         manifest = report()
         manifest['run_status'] = manifest.pop('state')
         (output_dir / 'Run_Manifest.json').write_text(json.dumps(manifest), encoding='utf-8')
@@ -346,7 +370,7 @@ def test_cancel_is_resumable_and_resume_uses_output_folder(window, tmp_path, app
 
     def resume(output_dir, *, max_batches=None, on_progress=None,
                on_event=None, cancel_requested=None, keep_checkpoint=False):
-        assert output_dir == tmp_path / 'export'
+        assert output_dir == window._output_dir
         assert threading.get_ident() != gui_ident
         return report()
 
@@ -432,22 +456,18 @@ def test_no_selected_address_columns_does_not_start_a_job(window, tmp_path, monk
     assert 'running' not in window.summary.text().lower()
 
 
-def test_nonempty_output_is_explained_before_start_without_changing_files(
-        window, tmp_path, monkeypatch):
+def test_occupied_output_parent_is_preserved_and_new_run_is_child(window, tmp_path, monkeypatch, app):
     configure(window, tmp_path)
-    output = tmp_path / 'export'
-    output.mkdir()
-    marker = output / 'existing.txt'
-    marker.write_text('preserve this', encoding='utf-8')
-    calls = []
-    install_runner(monkeypatch, lambda *args, **kwargs: calls.append(True))
+    parent = tmp_path / 'export'
+    parent.mkdir()
+    marker = parent / 'existing.txt'
+    marker.write_text('preserve this', encoding='utf8')
+    install_runner(monkeypatch, lambda *args, **kwargs: report())
     window.start_job()
-    assert not window.busy
-    assert not calls
-    assert marker.read_text(encoding='utf-8') == 'preserve this'
-    assert list(output.iterdir()) == [marker]
-    assert 'empty' in window.statusBar().currentMessage().lower()
-    assert 'running' not in window.summary.text().lower()
+    wait(app, lambda: not window.busy)
+    assert window.job_state == 'done'
+    assert window._output_dir.parent == parent
+    assert marker.read_text(encoding='utf8') == 'preserve this'
 
 
 def test_address_selection_count_makes_multiple_selection_visible(window, tmp_path):
@@ -478,6 +498,7 @@ def test_extracted_xlsx_requires_explicit_fields_then_runs_without_page_column(
     window.input_path.setText(str(path))
     window.output_dir.setText(str(output))
     window.geo_db.setText(str(geo(tmp_path)))
+    window.hk_enabled.setChecked(False)
     window.preview_input()
     wait(app, lambda: not window.busy)
     assert not window.address_columns.selectedItems()
@@ -495,7 +516,7 @@ def test_extracted_xlsx_requires_explicit_fields_then_runs_without_page_column(
     window.start_job()
     wait(app, lambda: not window.busy)
     assert window.job_state == 'done', window.log.toPlainText()
-    with (output / 'Classified_Addresses.csv').open(encoding='utf-8-sig', newline='') as stream:
+    with (window._output_dir / 'Classified_Addresses.csv').open(encoding='utf-8-sig', newline='') as stream:
         row = next(csv.DictReader(stream))
     assert row['Page'] == '1'
     assert row['Country_Code'] == 'HK'
@@ -584,11 +605,11 @@ def test_real_runner_publishes_country_table_and_pack_version(window, tmp_path, 
     assert 'Determined: 2' in window.summary.text()
     assert 'Unresolved: 1' in window.summary.text()
     assert 'GeoNames: sha256:' in window.source_versions.text()
-    assert not (tmp_path / 'export' / '.country-state').exists()
+    assert not (window._output_dir / '.country-state').exists()
     assert window.results.pending_value.text() == '1'
     assert window.results.case_table.rowCount() == 1
     assert window.results.case_table.item(0, 0).text() == '3'
-    assert window.results.case_table.item(0, 4).text() == 'EMPTY_ADDRESS'
+    assert window.results.case_table.item(0, 6).text() == 'EMPTY_ADDRESS'
     assert 'not accuracy' in window.results.performance.text()
     assert not window.input_toggle.isChecked()
     window.input_toggle.click()
@@ -621,13 +642,13 @@ def test_real_runner_cancel_callback_preserves_checkpoint_for_resume(
         release.set()
         wait(app, lambda: not window.busy)
     assert window.job_state == 'cancelled', window.log.toPlainText()
-    assert (tmp_path / 'export' / '.country-state' / 'config.json').is_file()
-    assert not (tmp_path / 'export' / 'Run_Manifest.json').exists()
+    assert (window._output_dir / '.country-state' / 'config.json').is_file()
+    assert not (window._output_dir / 'Run_Manifest.json').exists()
     window.resume_button.click()
     wait(app, lambda: not window.busy)
     assert window.job_state == 'done', window.log.toPlainText()
     assert window.counts.item(0, 0).text() == 'JP'
-    assert not (tmp_path / 'export' / '.country-state').exists()
+    assert not (window._output_dir / '.country-state').exists()
 
 
 def test_detailed_status_timer_and_stage_percentage_are_honest(window, tmp_path, app, monkeypatch):
@@ -738,6 +759,7 @@ def test_analyze_uses_original_line_order_after_reselecting_first_line(window, t
     configure(window, tmp_path)
     window.address_columns.clear()
     columns = [f'NAME_ADDRESS_LINE{i}' for i in range(1, 6)]
+    (tmp_path / 'synthetic.csv').write_text(','.join(columns) + '\nJapan,,,,\n', encoding='utf8')
     window.address_columns.addItems(columns)
     for index in (1, 2, 3, 4, 0):
         window.address_columns.item(index).setSelected(True)
