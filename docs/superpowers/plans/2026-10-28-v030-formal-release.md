@@ -12,12 +12,25 @@ Verify the complete merged tree equals the tested preparation tree. Publish
 new immutable v0.3.0 tag/release as non-prerelease Latest. No force push or
 branch-protection bypass. Preserve candidate and historical artifacts.
 
-- [ ] Identity RED/GREEN; independent source-equivalence review.
-- [ ] Full formal-version regression, EXE/offline smoke and installed wheel.
-- [ ] Preparation CI, PR #4 merge and main tree/CI validation.
-- [ ] New tag and draft assets verified before final publication as Latest.
-- [ ] Canonical local deployment and exact remote/local hashes verified.
+- [x] Identity RED/GREEN; independent source-equivalence review.
+- [x] Full formal-version regression, EXE/offline smoke and installed wheel.
+- [x] Preparation CI, PR #4 merge and main tree/CI validation.
+- [x] New tag and draft assets verified before final publication as Latest.
+- [x] Canonical local deployment and exact remote/local hashes verified.
 
 Public assets: EXE, wheel, Release_Manifest.json and SHA256SUMS.txt only.
 Manual acceptance applies to application behavior, not exhaustive HK coverage,
 global accuracy or strict-postal approval. HK pack remains partial-source TEST.
+
+Completed: preparation cb427fd, independent source-equivalence review clear;
+identity 200 passed / 1 optional build skip, formal full local regression
+1,984 passed / 1 skipped / 2 existing xfails in 568.95s. Fresh formal EXE and
+isolated installed wheel passed. Main merge 32e69b4 has the exact preparation
+Git tree; main CI 40553816527 and Windows40553816402 both passed.
+
+Annotated v0.3.0 targets 32e69b4. Release425805597 is published, non-prerelease
+and Latest. All four remote asset hashes/sizes and downloaded bytes match;
+all eight historical releases (including names/bodies/asset metadata) and
+all historical tags are unchanged. Canonical EXE/CURRENT_RELEASE updated with
+verified hashes and backups. Formal deployment receipt:
+docs/releases/v0.3.0-validation.md. Subsequent receipt commit is docs only.
