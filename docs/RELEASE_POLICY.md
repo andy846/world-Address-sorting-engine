@@ -1,25 +1,23 @@
 # Current formal deployment
 
-The operator accepted manual testing on **25 October 2026** and requested that
-this version be the sole formal deployment and uploaded to GitHub.
+The operator accepted v0.3.0rc1 manual testing on **28 October 2026** and
+explicitly requested merging the final version and releasing it on GitHub.
+This authorizes promotion of that accepted candidate to **v0.3.0**.
 
-- **v0.2.0 is the only current supported formal application version.**
-- GitHub Latest and the README download entry identify v0.2.0. Main contains
-  the same released application source. Existing feature PRs are integrated
-  rather than left as competing deployment sources.
-- The canonical local executable is `D:\WASE\WorldAddressEngine.exe`, copied
-  from the verified v0.2.0 artifact and checked against its SHA256. The generated
-  `CURRENT_RELEASE.json` records its version, release URL and actual hash.
-- Earlier releases/tags and local build folders remain historical audit and
-  rollback material; they are not the active deployment. Do not overwrite or
-  delete published history to make a new version current.
-- Freeze the accepted business behavior from a99d94e / country rules7. Release
-  preparation changes version identity, documentation and CI identity checks.
-  Future behavior changes require a new requested development/release task,
-  fresh validation and a new immutable release identity.
-- Reference databases are separate versioned downloads. The optional Hong Kong
-  source remains explicitly partial, with 9,508 excluded features and a verified
-  receipt. A formal application release does not certify exhaustive source
-  coverage, global accuracy, deliverability or signed strict-postal approval.
-- Keep private inputs, row reports, plaintext checkpoints and benchmark oracles
-  local and out of source control, CI and release assets.
+- v0.3.0 is the sole current formal application version and GitHub Latest.
+- Merge existing PR #4 into main with its exact expected head and normal checks.
+  Release preparation changes version identity, documentation and CI identity
+  checks only; accepted business behavior is frozen at e42eeca / rules7.
+- Canonical local executable: `D:\WASE\WorldAddressEngine.exe`.
+  `CURRENT_RELEASE.json` records the published source, URL, bytes and hash.
+- Preserve prior tags/releases and every historical artifact unchanged, including
+  v0.2.0 and v0.1.0-alpha.0. Do not overwrite an existing published version.
+- Reference databases remain separately versioned downloads. Hong Kong retains
+  its partial-source TEST status and 9,508 quarantined features. Application
+  acceptance does not certify global accuracy, complete coverage, deliverability
+  or the separately gated strict-postal workflow.
+- Keep private inputs, row reports, checkpoints and benchmark oracles out of
+  GitHub, CI and release assets. Publish public-only EXE, wheel and receipts.
+
+Detailed accepted candidate validation: `docs/releases/v0.3.0rc1.md`.
+Formal release scope: `docs/releases/v0.3.0.md`.

@@ -74,7 +74,7 @@ jobs:
           from world_address_engine.data.zone_mappings import load_zone_mappings, zone_values
           from world_address_engine.matching.normalize import _converter
           profile = load_country_codes()
-          assert world_address_engine.__version__ == '0.3.0rc1'
+          assert world_address_engine.__version__ == '0.3.0'
           assert len(profile.entries) == 235 and 'CNS' not in profile.entries
           assert profile.geo_to_code['XK'] == 'XO'
           zones = load_zone_mappings()
