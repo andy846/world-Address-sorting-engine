@@ -70,16 +70,16 @@ CURRENT_RELEASE.json; no main merge or formal promotion before new manual accept
 - [x] D: benchmark worker owns benchmark_country_repeat.py,
   country_benchmark_verify.py and their two unit-test modules only; authenticate
   schema2/zone metadata/new fields, preserve legacy verification where explicit.
-- [ ] Main integrates candidate version/CI/packaging assertions, per-task reviews,
+- [x] Main integrates candidate version/CI/packaging assertions, per-task reviews,
   full local/remote regression, actual candidate EXE and offline smoke.
-- [ ] Real private 9,604-row replay: identical original cells/country/status/reason;
+- [x] Real private 9,604-row replay: identical original cells/country/status/reason;
   42 unresolved retained; correct zones. Frozen 336 public cases stay passing.
-- [ ] Fresh million workload + cancel500k/fresh-process resume; exhaustive source,
+- [x] Fresh million workload + cancel500k/fresh-process resume; exhaustive source,
   code/zone/diagnostic/count and CSV/manifest equivalence. No runtime edits/commits
   or other heavy work during measurements. Only 9,606 distinct keys, report honestly.
-- [ ] Warm quick lookup >=48 distinct public addresses, idle and batch concurrent,
+- [x] Warm quick lookup >=48 distinct public addresses, idle and batch concurrent,
   P95 <=1s target; initial validation separately timed/progress visible.
-- [ ] Candidate GitHub Draft PR and local out/v0.3.0rc1 artifact for manual test;
+- [x] Candidate GitHub Draft PR and local out/v0.3.0rc1 artifact for manual test;
   do not overwrite current formal executable or published artifacts.
 
 ## Evidence / ledger
@@ -134,3 +134,29 @@ Actual 0.3.0rc1 EXE build and frozen offline workflow self-test passed:
 48,801,605 bytes, all prior and new strict gates true, no DB bundled.
 Fresh private schema2 replay preserved all 9,604 originals/codes/diagnostics
 and verified every zone pair; public 336/336 smoke bank passed unchanged.
+
+Final acceptance receipts (candidate, not formal promotion): full local 1,984
+passed / 1 skipped / 2 existing xfails; actual local EXE and fresh installed
+wheel passed. GitHub validation 40336180259 passed Linux (1,698/122/2) and
+Windows (1,668/319), including explicit real EXE smoke. Windows regression
+40336180004 passed 1,669/318 including real packaging. Optional-Qt test-only
+guard 43e09bb fixed the initial Linux collection failure; runtime unchanged.
+Independent final cross-contract review was clear.
+
+Measured frozen clean commit 43e09bb: repeated million 235.411s, 79,233,024-byte
+peak RSS; cancel at 500k 98.462s, fresh-process resume 238.661s. Both outputs
+exhaustively verified and all three CSVs plus manifests identical. Checkpoints
+removed on completion. Workload has only 9,606 distinct keys. Real GUI idle
+48-query P95 25.36ms, different 48 queries concurrent with 96k public batch
+P95 122.14ms; initial model/reference preparation 46.401s separately.
+DB sizes unchanged: Compact142,577,664 / Extended1,087,344,640 /
+HK747,376,640 bytes. Full receipts/artifact hashes/review corrections and
+remaining acceptance scopes are in docs/releases/v0.3.0rc1.md and its JSON.
+Draft PR #4 is attached. v0.2.0 Latest/root EXE preserved; next step is manual
+candidate acceptance. No global accuracy, million-distinct or production claim.
+
+Final receipt completed on 28 October: CI attestation explicitly names 43e09bb;
+remaining commit is documentation only. Aggregate/privacy review found no data
+leak. Existing EXE self-test, runtime fingerprint and formal EXE hash rechecked;
+light/dark and batch captures readable after loading Windows fonts in the
+offscreen harness. Application source and validated behavior remain unchanged.
