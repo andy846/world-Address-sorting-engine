@@ -15,6 +15,8 @@ from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow, QTableWidg
 
 from world_address_engine.gui.app import WorkerThread, _LIVE_THREADS, _thread_finished
 from world_address_engine.gui.branding import apply_branding
+from world_address_engine.gui.country_lookup import LookupThread
+from world_address_engine.gui.country_paths import discover_pack, allocate_run_directory, preflight_references
 
 STAGE_NAMES = {
     'preview': 'Reading input and checking address columns',
@@ -37,23 +39,11 @@ STAGE_NAMES = {
 
 
 def _discover_geo_pack() -> str:
-    """Prefer the newest installed k2 Extended pack, then Compact."""
-    root = Path.cwd() / 'packs'
-    for profile in ('extended', 'compact'):
-        for folder in sorted(root.glob(f'geonames-{profile}-global-*-k2'), reverse=True):
-            db = folder / 'pack.db'
-            if db.is_file():
-                return str(db)
-    return ''
+    return discover_pack('geo')
 
 
 def _discover_hk_pack() -> str:
-    """Suggest an installed regional pack without validating or enabling it."""
-    for folder in sorted((Path.cwd() / 'packs').glob('hk-bilingual-als-*'), reverse=True):
-        db = folder / 'pack.db'
-        if db.is_file():
-            return str(db)
-    return ''
+    return discover_pack('hk')
 
 
 def _input_header(path: Path, encoding: str, sheet: str | None) -> tuple[list[str], str | None]:
@@ -111,9 +101,10 @@ def _read_country_export(output_dir: Path, report: dict, cancel_requested=None) 
                 code = row['Country_Code']
                 name = (row.get('Country_Name_EN') or row.get('Country_Name')
                         or row.get('Country_Name_TC') or '')
-                rows.append((code, name if code else 'Unresolved', int(row['Count'])))
+                rows.append((code, name if code else 'Unresolved', int(row['Count']),
+                             row.get('Zone_Code', ''), row.get('NOVSN_Zone_Code', '')))
     else:
-        rows = [(code, '', count) for code, count in
+        rows = [(code, '', count, '', '') for code, count in
                 sorted(merged.get('destination_counts', {}).items())]
     payload = {'report': merged, 'rows': rows}
     if (output_dir / 'Classified_Addresses.csv').is_file():
@@ -151,6 +142,7 @@ def _read_partial_country_result(output_dir: Path, report: dict) -> dict:
 class CountryAnalysisWindow(QMainWindow):
     """Import, preview, analyze, and resume country counts without postal approval."""
 
+    runDirectoryAllocated = Signal(object)
     jobFinished = Signal()
     jobFailed = Signal(str)
 
@@ -159,6 +151,8 @@ class CountryAnalysisWindow(QMainWindow):
         apply_branding(self)
         self.setWindowTitle('World Address Sorting Engine - Country Code Analysis')
         self.resize(1280, 820)
+        self.runDirectoryAllocated.connect(self._run_allocated)
+        self.lastRunDir = None
         self._thread = None
         self._worker_pending = False
         self._cancel = threading.Event()
@@ -181,12 +175,89 @@ class CountryAnalysisWindow(QMainWindow):
         self._activity_timer = QTimer(self)
         self._activity_timer.setInterval(250)
         self._activity_timer.timeout.connect(self._refresh_activity)
+        self._lookup_generation = 0
+        self._lookup_ready = False
+        self._lookup_thread = LookupThread()
+        self._lookup_thread.state.connect(self._lookup_state)
+        self._lookup_thread.result.connect(self._lookup_result)
+        self._lookup_thread.settled.connect(self._lookup_settled)
+        self._lookup_thread.finished.connect(self._lookup_finished)
         self._build()
+        self._pack_timer = QTimer(self)
+        self._pack_timer.setSingleShot(True)
+        self._pack_timer.setInterval(200)
+        self._pack_timer.timeout.connect(self._warm_lookup)
+        for field in (self.geo_db, self.hk_regional_db):
+            field.textChanged.connect(self._pack_changed)
+        self.hk_enabled.toggled.connect(self._pack_changed)
+        self.quick.edited.connect(self._lookup_edited)
+        self.quick.queryRequested.connect(self._query_lookup)
+        _LIVE_THREADS.add(self._lookup_thread)
+        self._lookup_thread.finished.connect(partial(_thread_finished, self._lookup_thread))
+        self._lookup_thread.start()
+        self._pack_timer.start(0)
         QApplication.instance().paletteChanged.connect(self._system_palette_changed)
 
     def _build(self) -> None:
         from world_address_engine.gui.country_layout import build_workbench
         build_workbench(self, _discover_geo_pack, _discover_hk_pack)
+
+    def _lookup_config(self):
+        return (self.geo_db.text().strip(),
+                self.hk_regional_db.text().strip() if self.hk_enabled.isChecked() else '',
+                self.hk_enabled.isChecked())
+
+    def _pack_changed(self, *_):
+        self._appearance_settings.setValue('packs/geo', self.geo_db.text())
+        self._appearance_settings.setValue('packs/hk', self.hk_regional_db.text())
+        self._appearance_settings.setValue('packs/hk_enabled', self.hk_enabled.isChecked())
+        self._lookup_ready = False
+        self.quick.invalidate()
+        self.quick.query.setEnabled(False)
+        self.quick.status.setText('Reference settings changed; verifying…')
+        self._pack_timer.start()
+
+    def _use_installed_packs(self):
+        self.geo_db.setText(_discover_geo_pack())
+        self.hk_regional_db.setText(_discover_hk_pack())
+        self.hk_enabled.setChecked(True)
+        self._pack_changed()
+
+    def _warm_lookup(self):
+        if not self._closing:
+            self._lookup_thread.submit(self._lookup_generation, self._lookup_config())
+
+    def _lookup_edited(self):
+        self._lookup_generation += 1
+        self.quick.query.setEnabled(self._lookup_ready)
+        if not self._lookup_ready and hasattr(self, '_pack_timer'):
+            self._pack_timer.start()
+
+    def _query_lookup(self):
+        if self._closing or not self.quick.address.toPlainText().strip():
+            return
+        self.quick.invalidate()
+        self.quick.query.setEnabled(False)
+        self.quick.status.setText('Querying offline…')
+        self._lookup_thread.submit(self._lookup_generation, self._lookup_config(), self.quick.address.toPlainText())
+
+    def _lookup_state(self, generation, ready, message):
+        if not self._closing and generation == self._lookup_generation:
+            self._lookup_ready = ready
+            self.quick.status.setText(message)
+            self.pack_status.setText(message)
+
+    def _lookup_result(self, generation, payload):
+        if not self._closing and generation == self._lookup_generation:
+            self.quick.show_result(payload)
+
+    def _lookup_settled(self, generation):
+        if not self._closing:
+            self.quick.query.setEnabled(self._lookup_ready)
+
+    def _lookup_finished(self):
+        if self._closing and not self.busy:
+            self.close()
 
     def changeEvent(self, event):
         super().changeEvent(event)
@@ -314,8 +385,7 @@ class CountryAnalysisWindow(QMainWindow):
                               'processed': 0, 'committed': 0})
         self._activity_timer.start()
         self.results.set_busy(True)
-        self.inputs.setEnabled(False)
-        self.input_toggle.setEnabled(False)
+        # Settings may change for the next run; this worker captured its pins.
         for button in (self.run_button, self.resume_button, self.preview_button):
             button.setEnabled(False)
         self.cancel_button.setEnabled(True)
@@ -479,19 +549,9 @@ class CountryAnalysisWindow(QMainWindow):
                          'Click Preview / load columns, then click each address field to select it. '
                          'Displayed column names are not automatically selected.')
             return
-        chosen = self.output_dir.text().strip()
-        output = Path(chosen) if chosen else source.parent / f'{source.stem}-country-analysis'
-        try:
-            occupied = output.exists() and (not output.is_dir() or next(output.iterdir(), None) is not None)
-        except OSError as exc:
-            self._operation_failed(f'Cannot inspect output folder: {exc}')
-            return
-        if occupied:
-            self.summary.setText('Analysis not started. Choose a different empty output folder.')
-            self._notify('Output folder is not empty',
-                         'Existing files were not changed. Choose a new empty folder for a new analysis. '
-                         'Use Resume only to continue the original run with its saved settings.')
-            return
+        parent_text = self.output_dir.text().strip()
+        parent = Path(parent_text) if parent_text else source.parent
+        self._appearance_settings.setValue('output/parent', parent_text)
         geo_db = Path(geo_text)
         cancel = self._cancel
         hk_enabled = self.hk_enabled.isChecked()
@@ -501,28 +561,41 @@ class CountryAnalysisWindow(QMainWindow):
             from world_address_engine.jobs.country_analysis import analyze_job
             regional_options = {}
             if hk_enabled:
-                if not hk_path:
-                    raise ValueError('Choose a Hong Kong regional pack or disable the optional pack.')
+                if not hk_path or not Path(hk_path).is_file():
+                    raise ValueError('Choose an installed Hong Kong pack or disable it.')
                 regional_options['hk_regional_db'] = Path(hk_path)
             if not options['sheet_name'] and source.suffix.lower() == '.xlsx':
                 _, options['sheet_name'] = _input_header(source, options['encoding'], None)
+            # Validate the mapping even for header-only files before reserving a folder.
+            from world_address_engine.io.delimited import _record
+            header, _ = _input_header(source, options['encoding'], options['sheet_name'])
+            _record(1, source, dict.fromkeys(header, ''), tuple(options['address_columns']), None)
+            from world_address_engine.data.zone_mappings import load_zone_mappings
+            load_zone_mappings()
+            identity = preflight_references(geo_db, regional_options.get('hk_regional_db'))
+            reference_options = {'expected_reference_identity': identity} if identity is not None else {}
+            if cancel.is_set():
+                raise ValueError('Analysis cancelled before output allocation.')
+            output = allocate_run_directory(source, parent)
+            self.runDirectoryAllocated.emit(output)
             result = analyze_job(source, output, geo_db, options,
                                  on_progress=emit, on_event=emit_event, cancel_requested=cancel.is_set,
-                                 **regional_options)
+                                 **regional_options, **reference_options)
             if result.get('state', result.get('run_status')) == 'COMPLETE':
                 return _read_country_export(output, result, cancel.is_set)
             return _read_partial_country_result(output, result)
 
-        self._begin_analysis(output, work)
+        self._begin_analysis(None, work)
 
     def resume_job(self) -> None:
         if self.busy or self._closing:
             return
-        chosen = self.output_dir.text().strip()
-        output = Path(chosen) if chosen else self._output_dir
+        output = self._output_dir
         if output is None:
-            self._notify('Nothing to resume', 'Choose the interrupted run output folder first.')
-            return
+            chosen = QFileDialog.getExistingDirectory(self, 'Choose the interrupted run folder')
+            if not chosen:
+                return
+            output = Path(chosen)
         cancel = self._cancel
 
         def work(emit, emit_event):
@@ -534,10 +607,14 @@ class CountryAnalysisWindow(QMainWindow):
 
         self._begin_analysis(output, work)
 
-    def _begin_analysis(self, output: Path, work) -> None:
-        self._output_dir = output.resolve()
-        self.output_dir.setText(str(self._output_dir))
+    def _run_allocated(self, output):
+        self._output_dir = Path(output).resolve()
+        self.lastRunDir = self._output_dir
         self.export_location.setText(f'Output folder: {self._output_dir}')
+
+    def _begin_analysis(self, output: Path | None, work) -> None:
+        if output is not None:
+            self._run_allocated(output)
         self.open_output_button.setEnabled(False)
         self.counts.setRowCount(0)
         self.results.reset()
@@ -678,8 +755,10 @@ class CountryAnalysisWindow(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._output_dir)))
 
     def closeEvent(self, event) -> None:
-        if self.busy:
-            self._closing = True
+        self._closing = True
+        self._pack_timer.stop()
+        self._lookup_thread.shutdown()
+        if self.busy or self._lookup_thread.isRunning():
             self.cancel_job()
             self.statusBar().showMessage('Closing after the current operation stops...')
             event.ignore()

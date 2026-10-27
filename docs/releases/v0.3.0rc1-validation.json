@@ -1,0 +1,271 @@
+{
+  "candidate_version": "0.3.0rc1",
+  "status": "candidate-awaiting-manual-acceptance",
+  "date_hong_kong": "2026-10-26",
+  "validated_runtime_commit": "43e09bb045e18ca95dae930048c4f5f8d44d29f7",
+  "runtime_source_sha256": "6fa481354aa8a2c47af5c7fb995ecf53717d8d925e440ac2c12709d22f8c8b90",
+  "report_schema_version": 2,
+  "country_rules_version": "2026-10-25.country.7",
+  "zone_mapping": {
+    "version": "user-provided-zones-20250708-v1",
+    "source_sha256": "41b84a0938c1ebe320514b29c567ceedcf9f9868e99f84f3387bb8899cf2f373",
+    "sha256": "4276cf8b989e6663cbb5a32342470200535832ce6670ad8b91970a28d55c444d"
+  },
+  "local_regression": {
+    "passed": 1984,
+    "skipped": 1,
+    "existing_xfailed": 2,
+    "seconds": 494.47
+  },
+  "ci": {
+    "validation_run": 40336180259,
+    "windows_regression_run": 40336180004,
+    "linux": {
+      "passed": 1698,
+      "skipped": 122,
+      "xfailed": 2,
+      "seconds": 94.08,
+      "fresh_installed_wheel": "passed"
+    },
+    "windows_bundle": {
+      "passed": 1668,
+      "skipped": 319,
+      "seconds": 585.19,
+      "actual_exe_smoke": "passed",
+      "exe_bytes": 49361594
+    },
+    "windows_regression": {
+      "passed": 1669,
+      "skipped": 318,
+      "seconds": 476.87,
+      "actual_packaging_test": "passed"
+    },
+    "attested_commit": "43e09bb045e18ca95dae930048c4f5f8d44d29f7"
+  },
+  "private_replay": {
+    "passed": true,
+    "records": 9604,
+    "status_counts": {
+      "DETERMINED": 7143,
+      "INFERRED": 2419,
+      "UNRESOLVED": 42
+    },
+    "country_codes_identical": true,
+    "original_cells_identical": true,
+    "diagnostics_byte_identical": true,
+    "zone_pairs_verified": 9604,
+    "schema": 2,
+    "zone_mapping": {
+      "version": "user-provided-zones-20250708-v1",
+      "source_sha256": "41b84a0938c1ebe320514b29c567ceedcf9f9868e99f84f3387bb8899cf2f373",
+      "sha256": "4276cf8b989e6663cbb5a32342470200535832ce6670ad8b91970a28d55c444d"
+    }
+  },
+  "selected_public_hk_bank": {
+    "cases": 336,
+    "failures": 0,
+    "global_accuracy_estimate": false
+  },
+  "quick_lookup": {
+    "passed": true,
+    "initial_verification_seconds": 46.40073820017278,
+    "idle": {
+      "queries": 48,
+      "distinct_addresses": 48,
+      "p95_seconds": 0.025360000086948276,
+      "max_seconds": 1.5732647001277655,
+      "mean_seconds": 0.04802992082841229,
+      "batch_busy_queries": 0,
+      "p95_target_passed": true
+    },
+    "during_batch": {
+      "queries": 48,
+      "distinct_addresses": 48,
+      "p95_seconds": 0.12214290001429617,
+      "max_seconds": 0.14846550021320581,
+      "mean_seconds": 0.034793210434145294,
+      "batch_busy_queries": 48,
+      "p95_target_passed": true
+    },
+    "public_batch_records": 96000,
+    "different_distinct_queries_total": 96,
+    "max_ui_timer_gap_seconds": 0.050477299839258194,
+    "peak_rss_bytes": 107036672,
+    "automatic_sibling_output": true,
+    "clear_invalidated": true,
+    "reference_profile": "EXTENDED_GLOBAL + HK partial",
+    "country_rules": "2026-10-25.country.7"
+  },
+  "repeated_million": {
+    "workload": {
+      "block_records": 10000,
+      "repeats": 100,
+      "original_records": 9604,
+      "control_rows_per_block": 396,
+      "distinct_classification_keys": 9606,
+      "source_bytes": 132199207,
+      "dataset_sha256": "5e2b972e9277e80426c40332de55ec2b6f133c78bcf50ad0ee1251186b2e09bc",
+      "repetition_pattern": "whole-block"
+    },
+    "metrics": {
+      "uninterrupted-start": {
+        "run_status": "COMPLETE",
+        "resume": false,
+        "process_id": 36720,
+        "seconds": 235.411,
+        "peak_rss_bytes": 79233024,
+        "checkpoint_bytes": 838394193,
+        "checkpoint_removed": true,
+        "completed_report_bytes": 183354505,
+        "record_count": 1000000,
+        "records_per_second": 4247.88,
+        "classify_calls": 2000000,
+        "inference_calls": 9606,
+        "stage_started_seconds": {
+          "validating": 0.0,
+          "hashing_input": 0.022,
+          "hashing_pack": 0.185,
+          "hashing_hk_pack": 1.499,
+          "loading": 3.093,
+          "restoring": 37.731,
+          "classifying": 37.742,
+          "verifying_sources": 136.296,
+          "exporting": 141.491,
+          "finalizing": 231.406,
+          "complete": 235.229
+        }
+      },
+      "recovered-start": {
+        "run_status": "CANCELLED",
+        "resume": false,
+        "process_id": 27276,
+        "seconds": 98.462,
+        "peak_rss_bytes": 77852672,
+        "checkpoint_bytes": 419037040,
+        "checkpoint_removed": false,
+        "completed_report_bytes": 0,
+        "record_count": 500000,
+        "records_per_second": null,
+        "classify_calls": 500000,
+        "inference_calls": 9606,
+        "stage_started_seconds": {
+          "validating": 0.0,
+          "hashing_input": 0.029,
+          "hashing_pack": 0.213,
+          "hashing_hk_pack": 1.667,
+          "loading": 3.144,
+          "restoring": 36.951,
+          "classifying": 36.959,
+          "cancelled": 98.168
+        }
+      },
+      "recovered-resume": {
+        "run_status": "COMPLETE",
+        "resume": true,
+        "process_id": 43600,
+        "seconds": 238.661,
+        "peak_rss_bytes": 80179200,
+        "checkpoint_bytes": 838394193,
+        "checkpoint_removed": true,
+        "completed_report_bytes": 183354505,
+        "record_count": 1000000,
+        "records_per_second": null,
+        "classify_calls": 2000000,
+        "inference_calls": 9606,
+        "stage_started_seconds": {
+          "validating": 0.0,
+          "hashing_input": 0.111,
+          "hashing_pack": 0.371,
+          "loading": 1.841,
+          "hashing_hk_pack": 1.945,
+          "restoring": 37.958,
+          "classifying": 99.755,
+          "verifying_sources": 136.121,
+          "exporting": 141.833,
+          "finalizing": 234.513,
+          "complete": 238.406
+        }
+      }
+    },
+    "both_outputs_exhaustively_verified": true,
+    "manifests_identical": true,
+    "verification": {
+      "verified": true,
+      "total_records": 1000000,
+      "status_counts": {
+        "DETERMINED": 753900,
+        "INFERRED": 241900,
+        "UNRESOLVED": 4200
+      },
+      "sha256": {
+        "Classified_Addresses.csv": "cf0aaa1352f275b8d184e26c8945d4356666ff3f39c42fc52382945b53f3d9b3",
+        "Country_Summary.csv": "58ebfdf7d76996435f65f68979c2b34eb9e4f566e463686fd614703757e63af2",
+        "Country_Diagnostics.csv": "0b310f5a7d41705139fd546eb641c6d2ed3effac99ec755b5463f0b8bbf4dafe"
+      },
+      "byte_identical_to_uninterrupted": true,
+      "verification_seconds": 24.881,
+      "verification_peak_rss_bytes": 66072576
+    }
+  },
+  "artifacts": [
+    {
+      "name": "WorldAddressEngine.exe",
+      "bytes": 48801605,
+      "sha256": "7ba969c814a011b7dd2abacf67daebf198caa237e4e56de0e80acd7cbc26551a"
+    },
+    {
+      "name": "world_address_sorting_engine-0.3.0rc1-py3-none-any.whl",
+      "bytes": 216278,
+      "sha256": "b6c45759aa2bcc09a22b4119d79dd91e519f953c31c9869570a3f99d7dd586a2"
+    }
+  ],
+  "packs": [
+    {
+      "profile": "COMPACT_GLOBAL",
+      "version": "2026-10-22-k2",
+      "bytes": 142577664,
+      "sha256": "f4ef044e94aa3d206f8fce1fa3e0d7ab5f03d6081d142fd7f9e8cf5837ab1b3f"
+    },
+    {
+      "profile": "EXTENDED_GLOBAL",
+      "version": "2026-10-22-k2",
+      "bytes": 1087344640,
+      "sha256": "70d617a532b8faedd7d9703c9b952945f101334907df5936725123d20be1f70f"
+    },
+    {
+      "profile": "HK_BILINGUAL_REGIONAL",
+      "version": "2026-10-23-r1-partial",
+      "bytes": 747376640,
+      "sha256": "bd5edd2eaacbfe9459df27d7c338899c29bdaa828c76bb13573799077a926ac8",
+      "coverage": "partial-source TEST",
+      "quarantined_features": 9508
+    }
+  ],
+  "formal_deployment_preserved": {
+    "version": "0.2.0",
+    "github_latest": true,
+    "exe_sha256": "514ba4cb73ad69e1f5d66005b300d720c33644fb06353af057564164c1c58e21"
+  },
+  "independent_reviews": "Data, core, GUI, benchmark, packaging and final integration reviewed; important findings fixed and rechecked.",
+  "limits": [
+    "Manual acceptance of this candidate is pending.",
+    "Million workload has 9606 distinct classification keys; not million-distinct accuracy.",
+    "Selected public HK bank is not a global accuracy estimate.",
+    "HK source remains partial-source TEST.",
+    "Clean disconnected Windows installation, labelled global accuracy and million-distinct/5M workloads remain separate gates."
+  ],
+  "receipt_finalized_date_hong_kong": "2026-10-28",
+  "receipt_scope": "Documentation-only finalization; CI and performance attest runtime commit 43e09bb.",
+  "artifact_recheck_2026_10_28": {
+    "runtime_fingerprint_unchanged": true,
+    "actual_frozen_exe_self_test": "passed",
+    "formal_exe_hash_unchanged": true
+  },
+  "visual_check_2026_10_28": {
+    "light": "passed",
+    "dark": "passed",
+    "batch_page": "passed",
+    "offscreen_capture_font": "Segoe UI with Chinese fallback loaded",
+    "application_source_unchanged": true
+  }
+}

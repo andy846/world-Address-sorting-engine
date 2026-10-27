@@ -264,11 +264,12 @@ def test_workbench_reports_equal_direct_runner_with_reversed_column_clicks(windo
     window.address_columns.addItems(columns)
     for index in (4, 3, 2, 1, 0):
         window.address_columns.item(index).setSelected(True)
+    window.hk_enabled.setChecked(False)
     window.start_job()
     wait(app, lambda: not window.busy)
     assert window.job_state == 'done', window.log.toPlainText()
     assert window._last_report['status_counts'] == report['status_counts']
     assert report['status_counts'] == {'DETERMINED': 2, 'INFERRED': 0, 'UNRESOLVED': 1}
     for name in ('Classified_Addresses.csv', 'Country_Diagnostics.csv', 'Country_Summary.csv'):
-        assert (baseline / name).read_bytes() == (actual / name).read_bytes()
+        assert (baseline / name).read_bytes() == (window._output_dir / name).read_bytes()
     assert source.read_bytes() == original

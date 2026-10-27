@@ -31,6 +31,9 @@ from world_address_engine.jobs.checkpoint import atomic_json, file_sha256
 from world_address_engine.data.hk_regional import hk_pack_metadata
 from world_address_engine.jobs.country_analysis import analyze_job, resume_analysis
 from world_address_engine.matching.country import COUNTRY_RULES_VERSION, CountryClassifier
+from country_benchmark_verify import (GENERATED_COLUMNS, DIAGNOSTIC_COLUMNS,
+                                      SUMMARY_COLUMNS, SUMMARY_COLUMNS_V2,
+                                      report_contract, valid_zone_identity)
 
 CYCLE = '_Benchmark_Cycle'
 BASE_ROW = '_Benchmark_Base_Row'
@@ -39,17 +42,32 @@ FORBIDDEN = {CYCLE, BASE_ROW, 'Country_Code', 'Country', 'COUNTRY'}
 
 def _read(path):
     with Path(path).open(encoding='utf-8-sig', newline='') as stream:
-        yield from csv.DictReader(stream, strict=True)
+        yield from csv.reader(stream, strict=True)
 
 
-def _oracle_item(fields, found):
+def _zone_identity(zones):
+    result = {'version': zones.version, 'source_sha256': zones.source_sha256,
+              'sha256': zones.fingerprint}
+    valid_zone_identity(result)
+    return result
+
+
+def _oracle_item(fields, found, zones):
+    from world_address_engine.data.zone_mappings import zone_values
+    zone, novsn = zone_values(found.country_code, zones)
     return {'fields': fields, 'code': found.country_code, 'status': found.status,
-            'reason': found.reason, 'candidates': list(found.candidates)}
+            'reason': found.reason, 'candidates': list(found.candidates),
+            'zone_code': zone, 'novsn_zone_code': novsn}
 
 
-def _baseline_block(source, baseline, pack, hk_regional=None):
+def _baseline_block(source, baseline, pack, hk_regional=None, zones=None):
+    from world_address_engine.data.zone_mappings import load_zone_mappings, zone_values
+    zones = zones if zones is not None else load_zone_mappings()
     manifest = json.loads((baseline / 'Run_Manifest.json').read_text(encoding='utf-8-sig'))
     metadata = manifest.get('run_metadata', {})
+    version, generated = report_contract(manifest)
+    if version == 2 and metadata.get('zone_mapping') != _zone_identity(zones):
+        raise ValueError('baseline zone mapping changed')
     if manifest.get('run_status') != 'COMPLETE' or manifest.get('job_kind') != 'country-analysis':
         raise ValueError('baseline is not a complete country analysis')
     if metadata.get('rules_version') != COUNTRY_RULES_VERSION:
@@ -62,7 +80,8 @@ def _baseline_block(source, baseline, pack, hk_regional=None):
         raise ValueError('baseline regional selection changed')
     from world_address_engine.data.country_codes import load_country_codes
     from world_address_engine.jobs.country_analysis import _catalogue_metadata
-    for key, value in _catalogue_metadata(load_country_codes()).items():
+    catalogue = load_country_codes()
+    for key, value in _catalogue_metadata(catalogue).items():
         if metadata.get(key) != value:
             raise ValueError('baseline country catalogue changed')
     for name in ('Classified_Addresses.csv', 'Country_Diagnostics.csv', 'Country_Summary.csv'):
@@ -73,23 +92,64 @@ def _baseline_block(source, baseline, pack, hk_regional=None):
     # than five standard columns. No inference hints may be added accidentally.
     records = iter_csv_records(source, 'utf-8-sig', tuple(metadata.get('address_columns') or ()))
     block = []
+    detail = _read(baseline / 'Classified_Addresses.csv')
+    detail_columns = next(detail, None)
+    diagnostic = _read(baseline / 'Country_Diagnostics.csv')
+    if next(diagnostic, None) != DIAGNOSTIC_COLUMNS:
+        raise ValueError('baseline diagnostic columns changed')
+    statuses = Counter(dict.fromkeys(('DETERMINED', 'INFERRED', 'UNRESOLVED'), 0))
+    counts = Counter()
     for original, exported, diag in zip_longest(
-            records, _read(baseline / 'Classified_Addresses.csv'), _read(baseline / 'Country_Diagnostics.csv')):
+            records, detail, diagnostic):
         if original is None or exported is None or diag is None:
             raise ValueError('baseline/source row count mismatch')
         if FORBIDDEN.intersection(original.fields):
             raise ValueError('benchmark source has a reserved metadata or trusted-hint column')
-        if list(exported) != [*original.fields, 'Country_Code']:
+        if (detail_columns != [_protect(key) for key in original.fields] + generated or
+                len(exported) != len(original.fields) + len(generated)):
             raise ValueError('baseline original columns changed')
-        if any(exported[key] != _protect(value) for key, value in original.fields.items()):
+        if exported[:len(original.fields)] != [_protect(value) for value in original.fields.values()]:
             raise ValueError('baseline original field mismatch')
-        if diag['Source_Record_No'] != str(original.record_no):
+        if len(diag) != 4 or diag[0] != str(original.record_no):
             raise ValueError('baseline record order mismatch')
-        block.append({'fields': dict(original.fields), 'code': exported['Country_Code'] or None,
-                      'status': diag['Status'], 'reason': diag['Reason'],
-                      'candidates': diag['Candidates'].split(';') if diag['Candidates'] else []})
+        code = exported[len(original.fields)] or None
+        if ((code is not None and code not in catalogue.entries) or
+                diag[1] not in statuses or ((code is None) != (diag[1] == 'UNRESOLVED'))):
+            raise ValueError('baseline country/status changed')
+        candidates = diag[3].split(';') if diag[3] else []
+        if any(candidate not in catalogue.entries for candidate in candidates):
+            raise ValueError('baseline candidates changed')
+        zone, novsn = zone_values(code, zones)
+        if version == 2 and exported[-2:] != [_protect(zone), _protect(novsn)]:
+            raise ValueError('baseline zone pair changed')
+        block.append({'fields': dict(original.fields), 'code': code,
+                      'status': diag[1], 'reason': diag[2], 'candidates': candidates,
+                      'zone_code': zone, 'novsn_zone_code': novsn})
+        statuses[diag[1]] += 1
+        counts[code or ''] += 1
     if not block or len(block) != manifest['total_records']:
         raise ValueError('baseline source count mismatch or empty source')
+    if (manifest.get('status_counts') != dict(statuses) or
+            manifest.get('destination_counts') != {code: n for code, n in counts.items() if code}):
+        raise ValueError('baseline counts changed')
+    summary = _read(baseline / 'Country_Summary.csv')
+    summary_columns = SUMMARY_COLUMNS_V2 if version == 2 else SUMMARY_COLUMNS
+    if next(summary, None) != summary_columns:
+        raise ValueError('baseline summary columns changed')
+    seen = set()
+    for row in summary:
+        if len(row) != len(summary_columns) or row[0] not in counts or row[0] in seen:
+            raise ValueError('baseline summary countries changed')
+        code = row[0]
+        if row[-2:] != [str(counts[code]), f'{counts[code] * 100 / len(block):.2f}']:
+            raise ValueError('baseline summary counts changed')
+        if version == 2 and row[3:5] != [_protect(value) for value in zone_values(code, zones)]:
+            raise ValueError('baseline summary zone pair changed')
+        if not code and row[1:3] != ['', '']:
+            raise ValueError('baseline unresolved summary names changed')
+        seen.add(code)
+    if seen != set(counts):
+        raise ValueError('baseline summary countries missing')
     if not columns:
         columns = tuple(f'NAME_ADDRESS_LINE{i}' for i in range(1, 6)
                         if f'NAME_ADDRESS_LINE{i}' in block[0]['fields'])
@@ -111,7 +171,12 @@ def prepare_workload(source, baseline, controls, workspace, pack, *, repeats=100
             isinstance(control_rows, bool) or not isinstance(control_rows, int) or control_rows < 0):
         raise ValueError('repeat/control counts must be nonnegative integers, repeats positive')
     regional = hk_pack_metadata(hk_regional_db) if hk_regional_db is not None else None
-    block, address_columns, manifest = _baseline_block(source, baseline, pack, regional)
+    from world_address_engine.data.zone_mappings import load_zone_mappings
+    from world_address_engine.data.country_codes import load_country_codes
+    from world_address_engine.jobs.country_analysis import _catalogue_metadata
+    zones = load_zone_mappings()
+    zone_mapping = _zone_identity(zones)
+    block, address_columns, manifest = _baseline_block(source, baseline, pack, regional, zones)
     source_hash = file_sha256(source)
     baseline_hashes = {name: file_sha256(baseline / name) for name in
                        ('Run_Manifest.json', 'Classified_Addresses.csv', 'Country_Diagnostics.csv', 'Country_Summary.csv')}
@@ -121,34 +186,53 @@ def prepare_workload(source, baseline, controls, workspace, pack, *, repeats=100
     pool = public.get('controls', [])
     if public.get('schema_version') != 1 or not pool:
         raise ValueError('public control source manifest missing')
-    if len({c.get('control_id') for c in pool}) != len(pool):
+    if (not all(isinstance(c, dict) and isinstance(c.get('control_id'), str)
+                and c['control_id'] for c in pool) or
+            len({c['control_id'] for c in pool}) != len(pool)):
         raise ValueError('duplicate public control identifier')
+    catalogue = load_country_codes()
+    for control in pool:
+        if (control.get('expected_code') not in catalogue.entries or
+                not isinstance(control.get('source_url'), str) or
+                not control['source_url'].startswith('https://') or
+                not isinstance(control.get('lines'), list) or not control['lines'] or
+                len(control['lines']) > len(address_columns) or
+                not all(isinstance(line, str) for line in control['lines'])):
+            raise ValueError('public control source/label/address columns are invalid')
+    verified_controls = []
     with CountryClassifier(pack, hk_regional_db=hk_regional_db) as classifier:
-        for index in range(control_rows):
-            control = pool[index % len(pool)]
-            if (not re.fullmatch('[A-Z]{2}', control.get('expected_code', '')) or
-                    not control.get('source_url', '').startswith('https://') or
-                    not control.get('lines') or len(control['lines']) > len(address_columns)):
-                raise ValueError('public control source/label/address columns are invalid')
+        for control in pool:
             fields = dict.fromkeys(block[0]['fields'], '')
             for column, line in zip(address_columns, control['lines']):
                 fields[column] = line
-            if 'Control no' in fields:
-                fields['Control no'] = f'PUBLIC-BENCHMARK-{index + 1:06d}'
-            rec = _record(original_records + index + 1, source, fields, address_columns)
+            rec = _record(1, source, fields, address_columns)
             found = classifier.classify(rec)
             if found.country_code != control['expected_code']:
                 raise ValueError('public control classification disagrees with its independent label')
-            block.append(_oracle_item(fields, found))
+            verified_controls.append(_oracle_item(fields, found, zones))
+    for index in range(control_rows):
+        entry = verified_controls[index % len(verified_controls)]
+        fields = dict(entry['fields'])
+        if 'Control no' in fields:
+            fields['Control no'] = f'PUBLIC-BENCHMARK-{index + 1:06d}'
+        block.append({**entry, 'fields': fields})
     # All validity/control checks happen before creating any private artifacts.
     if file_sha256(source) != source_hash or file_sha256(controls) != controls_hash:
         raise ValueError('source or controls changed during preparation')
     if regional != (hk_pack_metadata(hk_regional_db) if hk_regional_db is not None else None):
         raise ValueError('regional pack changed during preparation')
+    if _zone_identity(load_zone_mappings()) != zone_mapping:
+        raise ValueError('zone mapping changed during preparation')
     workspace.mkdir(parents=True, exist_ok=False)
     _private_directory(workspace)
     (workspace / '.gitignore').write_text('*\n', encoding='utf-8')
-    oracle = {'schema_version': 1, 'rules_version': COUNTRY_RULES_VERSION,
+    reference_metadata = {key: value for key, value in manifest['run_metadata'].items()
+                          if key in ('geo_sha256', 'geo_manifest_sha256', 'geo_pack_version',
+                                     'pack_format_version', 'profile')}
+    oracle = {'schema_version': 2, 'report_schema_version': 2,
+              'generated_columns': list(GENERATED_COLUMNS), 'zone_mapping': zone_mapping,
+              'catalogue_metadata': _catalogue_metadata(catalogue),
+              'reference_metadata': reference_metadata, 'rules_version': COUNTRY_RULES_VERSION,
               'repeats': repeats, 'original_records': original_records,
               'control_rows_per_block': control_rows, 'address_columns': list(address_columns),
               'original_input_sha256': source_hash, 'baseline_hashes': baseline_hashes,
@@ -189,11 +273,25 @@ def _load_workload(workspace):
     if file_sha256(workspace / 'oracle.json') != info.get('oracle_sha256'):
         raise ValueError('benchmark oracle hash changed')
     oracle = json.loads((workspace / 'oracle.json').read_text(encoding='utf-8'))
+    if type(info.get('schema_version')) is not int or info['schema_version'] not in (1, 2):
+        raise ValueError('unsupported benchmark oracle schema')
     for key in ('schema_version', 'rules_version', 'repeats', 'original_records',
                 'control_rows_per_block', 'address_columns', 'original_input_sha256',
                 'controls_sha256', 'pack_sha256', 'hk_regional'):
         if info.get(key) != oracle.get(key):
             raise ValueError('benchmark oracle metadata changed')
+    if info['schema_version'] == 2:
+        for key in ('report_schema_version', 'generated_columns', 'zone_mapping',
+                    'catalogue_metadata', 'reference_metadata'):
+            if key not in info or info[key] != oracle.get(key):
+                raise ValueError('benchmark oracle metadata changed')
+        valid_zone_identity(info['zone_mapping'])
+        if (type(info['report_schema_version']) is not int or info['report_schema_version'] != 2 or
+                info['generated_columns'] != GENERATED_COLUMNS):
+            raise ValueError('benchmark report schema changed')
+    elif any(key in info or key in oracle for key in
+             ('zone_mapping', 'report_schema_version', 'generated_columns')):
+        raise ValueError('legacy benchmark identity cannot be reinterpreted')
     if (info['block_records'] != len(oracle['block']) or
             info['total_records'] != len(oracle['block']) * oracle['repeats'] or
             info['original_records'] + info['control_rows_per_block'] != len(oracle['block'])):
@@ -235,6 +333,15 @@ def run_workload(workspace, pack, name='uninterrupted', *, resume=False, stop_af
         raise ValueError('benchmark database hash changed')
     if info['rules_version'] != COUNTRY_RULES_VERSION:
         raise ValueError('benchmark rules changed')
+    if info['schema_version'] != 2:
+        raise ValueError('legacy workload is verification-only; prepare a new schema 2 workload')
+    from world_address_engine.data.zone_mappings import load_zone_mappings
+    from world_address_engine.data.country_codes import load_country_codes
+    from world_address_engine.jobs.country_analysis import _catalogue_metadata
+    if _zone_identity(load_zone_mappings()) != info['zone_mapping']:
+        raise ValueError('benchmark zone mapping changed')
+    if _catalogue_metadata(load_country_codes()) != info['catalogue_metadata']:
+        raise ValueError('benchmark country catalogue changed')
     regional = hk_pack_metadata(hk_regional_db) if hk_regional_db is not None else None
     if info.get('hk_regional') != regional:
         raise ValueError('benchmark regional selection changed')
@@ -319,13 +426,24 @@ def verify_workload(workspace, name='uninterrupted', compare=None):
     info, oracle = _load_workload(workspace)
     if file_sha256(workspace / 'dataset.csv') != info['dataset_sha256']:
         raise ValueError('benchmark dataset hash changed')
+    started = time.perf_counter()
+    result = None
     for run in [name, *([_safe_name(compare)] if compare else [])]:
         manifest = json.loads((workspace / run / 'Run_Manifest.json').read_text(encoding='utf-8-sig'))
         if manifest.get('run_metadata', {}).get('hk_regional') != info.get('hk_regional'):
             raise ValueError('verified run regional selection differs from the pinned workload')
-    started = time.perf_counter()
-    result = verify_repeated_output(workspace / 'dataset.csv', workspace / name,
-                                    oracle['block'], oracle['repeats'])
+        metadata = {'rules_version': info['rules_version'], 'geo_sha256': info['pack_sha256']}
+        options = {'report_schema_version': 1}
+        if info['schema_version'] == 2:
+            metadata.update(info['catalogue_metadata'])
+            metadata.update(info['reference_metadata'])
+            metadata['address_columns'] = info['address_columns']
+            options = {'report_schema_version': 2, 'zone_mapping': info['zone_mapping']}
+        checked = verify_repeated_output(workspace / 'dataset.csv', workspace / run,
+                                          oracle['block'], oracle['repeats'],
+                                          run_metadata=metadata, **options)
+        if result is None:
+            result = checked
     if compare:
         other = workspace / _safe_name(compare)
         reports = ('Classified_Addresses.csv', 'Country_Diagnostics.csv', 'Country_Summary.csv')

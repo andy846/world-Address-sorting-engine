@@ -15,6 +15,8 @@ from world_address_engine.io.reports import (
 STATUSES = ('DETERMINED', 'INFERRED', 'UNRESOLVED')
 REPORT_NAMES = ('Classified_Addresses.csv', 'Country_Summary.csv',
                 'Country_Diagnostics.csv')
+REPORT_SCHEMA_VERSION = 2
+GENERATED_COLUMNS = ('Country_Code', 'Zone_Code', 'NOVSN_Zone_Code')
 
 
 @lru_cache(maxsize=1)
@@ -43,12 +45,24 @@ def _private_directory(path: Path) -> None:
 
 def write_country_reports(items, output_dir: Path, catalogue, run_metadata: dict, *,
                           original_columns=(), allow_sparse_columns=False,
-                          before_manifest=None) -> dict:
-    """Write originals plus one code; percentages use all input rows as denominator.
+                          before_manifest=None, zone_catalogue=None) -> dict:
+    """Write originals plus country and literal zones; use all rows as denominator.
 
     Unresolved records have a blank code summary row. Diagnostics deliberately
     omit original fields and inference evidence. The return value is the manifest.
     """
+    from world_address_engine.data.zone_mappings import load_zone_mappings, zone_values
+    zones = zone_catalogue if zone_catalogue is not None else load_zone_mappings()
+    zone_metadata = {'version': zones.version, 'source_sha256': zones.source_sha256,
+                     'sha256': zones.fingerprint}
+    metadata = dict(run_metadata)
+    if 'zone_mapping' in metadata and metadata['zone_mapping'] != zone_metadata:
+        raise ValueError('zone mapping identity differs from the pinned analysis')
+    metadata['zone_mapping'] = zone_metadata
+    # Resolve once per country, not once per row in a million-row stream.
+    derived = {code: tuple(_protect(value) for value in (code, *zone_values(code, zones)))
+               for code in catalogue.entries}
+    derived[None] = ('', '', '')
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     if (output_dir / 'Run_Manifest.json').exists():
@@ -66,7 +80,7 @@ def write_country_reports(items, output_dir: Path, catalogue, run_metadata: dict
                 (stage / REPORT_NAMES[2]).open('w', encoding='utf-8-sig', newline='') as diagnostic:
             # Positional writers also preserve an original Country_Code column.
             writer = csv.writer(detail)
-            writer.writerow([_protect(column) for column in columns] + ['Country_Code'])
+            writer.writerow([_protect(column) for column in columns] + list(GENERATED_COLUMNS))
             diagnoses = csv.writer(diagnostic)
             diagnoses.writerow(['Source_Record_No', 'Status', 'Reason', 'Candidates'])
             for record, inference in chain((first,) if first else (), iterator):
@@ -86,7 +100,7 @@ def write_country_reports(items, output_dir: Path, catalogue, run_metadata: dict
                 statuses[status] += 1
                 if code is not None:
                     destinations[code] += 1
-                writer.writerow([_protect(record.fields.get(key, '')) for key in columns] + [code or ''])
+                writer.writerow([_protect(record.fields.get(key, '')) for key in columns] + list(derived[code]))
                 diagnoses.writerow([record.record_no, status, _protect(inference.reason),
                                     _protect(';'.join(inference.candidates))])
         if sum(destinations.values()) + statuses['UNRESOLVED'] != previous:
@@ -94,14 +108,15 @@ def write_country_reports(items, output_dir: Path, catalogue, run_metadata: dict
         with (stage / REPORT_NAMES[1]).open('w', encoding='utf-8-sig', newline='') as summary:
             writer = csv.writer(summary)
             writer.writerow(['Country_Code', 'Country_Name_TC', 'Country_Name_EN',
-                             'Count', 'Percentage'])
+                             'Zone_Code', 'NOVSN_Zone_Code', 'Count', 'Percentage'])
             for code, count in sorted(destinations.items()):
                 entry = catalogue.entries[code]
                 writer.writerow([_protect(code), _protect(entry.name_tc), _protect(entry.name_en),
+                                 *derived[code][1:],
                                  count, f'{count * 100 / previous:.2f}'])
             if statuses['UNRESOLVED']:
                 count = statuses['UNRESOLVED']
-                writer.writerow(['', '', '', count, f'{count * 100 / previous:.2f}'])
+                writer.writerow(['', '', '', '', '', count, f'{count * 100 / previous:.2f}'])
         for name in REPORT_NAMES:
             (stage / name).chmod(0o600)
         checksums = {name: _hash(stage / name) for name in REPORT_NAMES}
@@ -109,7 +124,9 @@ def write_country_reports(items, output_dir: Path, catalogue, run_metadata: dict
             'run_status': 'COMPLETE', 'job_kind': 'country-analysis',
             'data_class': 'COUNTRY_CODE_ESTIMATE', 'total_records': previous,
             'status_counts': dict(statuses), 'destination_counts': dict(sorted(destinations.items())),
-            'run_metadata': dict(run_metadata), 'files': list(REPORT_NAMES), 'sha256': checksums,
+            'report_schema_version': REPORT_SCHEMA_VERSION,
+            'generated_columns': list(GENERATED_COLUMNS),
+            'run_metadata': metadata, 'files': list(REPORT_NAMES), 'sha256': checksums,
         }
         if (output_dir / 'Run_Manifest.json').exists():
             raise FileExistsError('existing completed analysis cannot be overwritten')

@@ -26,9 +26,11 @@ The installer verifies checksums, SQLite integrity, counts and indexes and
 creates a new versioned directory. Reinstalling the same version is refused.
 No network access is needed.
 
-In the GUI, enable the optional Hong Kong regional pack and choose its
-`pack.db`. The GeoNames selector still requires the global pack. The regional
-option is disabled by default, even if an installed pack is discovered.
+In the formal v0.2.0 GUI, enable the optional Hong Kong regional pack and choose
+its `pack.db`; the option is disabled by default in that release. The v0.3
+candidate discovers installed packs and starts with Hong Kong enabled. Choose
+a valid installed pack or explicitly switch the option off if unavailable.
+The GeoNames selector still requires a global pack in both versions.
 
 The command-line equivalent is:
 

@@ -2,14 +2,44 @@
 
 A Python, **offline-first** address-list analyzer. Its default workflow outputs
 one **Country Code** per address plus counts by code, using English, Traditional
-Chinese and Simplified Chinese input. Air/surface service, rates, Zone and
-Novsn codes are not part of this analysis.
+Chinese and Simplified Chinese input. The v0.3.0 release adds literal Zone and
+NOVSN mappings from the supplied country list. It does not infer mail services
+or rates.
 
-## Country Code analysis (v0.2.0)
+## Country Code workflow (v0.3.0)
 
 The sole current operator-accepted formal release is
+[v0.3.0](https://github.com/andy846/world-Address-sorting-engine/releases/tag/v0.3.0),
+manually accepted on 28 October 2026. Download the Windows EXE and checksum
+file from that release. See [formal release scope](docs/releases/v0.3.0.md).
+
+- Installed global Extended (Compact fallback) and Hong Kong packs are discovered
+  automatically. Hong Kong starts enabled; choose an installed pack or explicitly
+  turn it off if unavailable. Reference verification runs in the background.
+- Each fresh GUI analysis creates `<input-name>_output_YYYYMMDD_HHMMSS` beside
+  the input. A custom output setting chooses its parent folder; collisions get
+  numbered suffixes. Resume uses the original run folder. CLI `--output` still
+  denotes an exact folder.
+- The **Single address lookup** tab accepts multiple address lines. Ctrl+Enter
+  queries locally, and Copy code copies the result. It also works during a
+  batch; editing or clearing the input invalidates the previous result. No
+  address history is saved.
+- New detail reports append `Country_Code`, `Zone_Code`, `NOVSN_Zone_Code`.
+  CN maps to `CN - Airmail` / `F`, HK to `LOCAL` / `A`, MO to
+  `Macau - Surface` / `M`, and TW to `Taiwan` / `F`. These are reference-table
+  labels, with no new service selection. Unresolved records leave all three
+  fields blank.
+
+New report manifests use schema 2 and pin the mapping version and hashes.
+Completed legacy reports can be inspected with blank zone fields; their files
+are preserved. Interrupted v0.2.0 jobs must be resumed with v0.2.0.
+The PDF parser is an optional build dependency only.
+
+## Previous v0.2.0 workflow (historical)
+
+The previous formal release is
 [v0.2.0 — Verified Country Code Analysis](https://github.com/andy846/world-Address-sorting-engine/releases/tag/v0.2.0),
-accepted by manual testing on 25 October 2026 and designated GitHub Latest.
+accepted by manual testing on 25 October 2026 and retained as history.
 Download the Windows EXE and checksum file there; reference databases remain
 in the separate [k2 data release](https://github.com/andy846/world-Address-sorting-engine/releases/tag/geonames-packs-2026-10-22-k2).
 
@@ -69,12 +99,12 @@ Country rules7 correct the two documented compound-street country errors;
 the unchanged 336-case smoke bank now passes. See the
 [correction and regression report](docs/COMPOUND_STREET_FIX_2026-10-25.md).
 This selected smoke bank does not establish global accuracy or readiness.
-v0.2.0 is the only currently supported formal application release; earlier
+v0.3.0 is the only currently supported formal application release; earlier
 versions are retained as history.
 
 ## Current release status (October 2026)
 
-- Formal v0.2.0 Country Code workflow: trilingual classification, streaming CSV/TXT/XLSX input, reconciled exports, cancellation/resume, optional verified HK evidence and a PySide6 workbench with read-only case inspection/export. Strict postal review remains separately available.
+- Formal v0.3.0 Country Code/Zone workflow: automatic output folders, concurrent quick lookup and audited Zone/NOVSN mappings, plus trilingual classification, streaming CSV/TXT/XLSX input, reconciled exports, cancellation/resume, optional verified HK evidence and a PySide6 workbench with read-only case inspection/export. Strict postal review remains separately available.
 - Both worldwide packs are preserved in [versioned data releases](docs/PACK_RELEASES_2026-10-23.md), verified and installable offline. Current k2 SQLite sizes are 142,577,664 bytes (Compact) and 1,087,344,640 bytes (Extended).
 - Historical country-rules6 repeated-million measurements: 183.661 seconds with the real HK pack, 149.293 seconds disabled; cancel at 500,000 and fresh-process resume passed exhaustive verification. The workload has 9,606 distinct keys. These are not relabelled as rules7/v0.2.0 throughput measurements. [Exact runtime receipts and limits](docs/HK_REGIONAL_VALIDATION_2026-10-25.md).
 - Remaining country-analysis validation: labelled global accuracy, low-duplication/million-distinct and 5M workloads, million-row GUI interaction and clean disconnected Windows installation. The separate strict postal classifier retains its official-catalogue approval gate and existing strict-retrieval limitations.

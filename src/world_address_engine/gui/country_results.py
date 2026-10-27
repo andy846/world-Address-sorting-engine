@@ -85,10 +85,10 @@ class CountryResultsPanel(QWidget):
         self.tabs.setObjectName('resultsTabs')
         self.tabs.setAccessibleName('Result views')
         self.tabs.setDocumentMode(True)
-        self.counts = QTableWidget(0, 3, self.tabs)
+        self.counts = QTableWidget(0, 5, self.tabs)
         self.counts.setObjectName('countryCounts')
         self.counts.setAccessibleName('Country summary')
-        self.counts.setHorizontalHeaderLabels(['Country Code', 'Country name', 'Count'])
+        self.counts.setHorizontalHeaderLabels(['Country Code', 'Country name', 'Count', 'Zone', 'NOVSN'])
         counts_header = self.counts.horizontalHeader()
         counts_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         counts_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -130,12 +130,12 @@ class CountryResultsPanel(QWidget):
         self.case_splitter.setObjectName('caseSplitter')
         self.case_splitter.setAccessibleName('Case list and full details')
         self.case_splitter.setChildrenCollapsible(False)
-        self.case_table = QTableWidget(0, 6, self.case_splitter)
+        self.case_table = QTableWidget(0, 8, self.case_splitter)
         self.case_table.setObjectName('caseTable')
         self.case_table.setAccessibleName('Cases in selected filter')
         self.case_table.setMinimumHeight(100)
         self.case_table.setHorizontalHeaderLabels([
-            'Source record', 'Address', 'Status', 'Country code', 'Reason', 'Candidates'])
+            'Source record', 'Address', 'Status', 'Country code', 'Zone', 'NOVSN', 'Reason', 'Candidates'])
         self.case_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.case_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.case_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
@@ -329,7 +329,8 @@ class CountryResultsPanel(QWidget):
         self.case_table.setRowCount(len(rows))
         for index, row in enumerate(rows):
             values = (row['record_no'], row['address'].replace('\n', ' / '), row['status'],
-                      row['code'], row['reason'], row['candidates'])
+                      row['code'], row.get('zone_code', ''), row.get('novsn_zone_code', ''),
+                      row['reason'], row['candidates'])
             for column, value in enumerate(values):
                 item = QTableWidgetItem(str(value)[:500])
                 self.case_table.setItem(index, column, item)
@@ -349,5 +350,6 @@ class CountryResultsPanel(QWidget):
         if row:
             self.case_detail.setPlainText(
                 f'Source record {row["record_no"]} | {row["status"]} | Country: {row["code"] or "not assigned"}\n'
+                f'Zone: {row.get("zone_code", "")} | NOVSN: {row.get("novsn_zone_code", "")}\n'
                 f'{row["explanation"]} [{row["reason"]}]\n'
                 f'Candidates: {row["candidates"] or "none"}\n{row["address"]}')

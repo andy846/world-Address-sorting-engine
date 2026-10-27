@@ -85,7 +85,7 @@ def test_valid_headers_and_empty_inputs_remain_supported(tmp_path, kind, empty, 
     assert result['total_records'] == (0 if empty else 1)
     assert result['destination_counts'] == ({} if empty else {'JP': 1})
     with (out / 'Classified_Addresses.csv').open(encoding='utf-8-sig', newline='') as stream:
-        assert next(csv.reader(stream)) == ['ID', header, 'Country_Code']
+        assert next(csv.reader(stream)) == ['ID', header, 'Country_Code', 'Zone_Code', 'NOVSN_Zone_Code']
     assert not (out / '.country-state').exists()
 
 

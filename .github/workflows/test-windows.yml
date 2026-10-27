@@ -6,6 +6,7 @@ on:
       - main
       - feat/hkp-trilingual-phase1
       - codex/hk-bilingual-regional
+      - feat/v0.3-workflow-zones
   pull_request:
     branches:
       - main
